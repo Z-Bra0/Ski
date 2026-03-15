@@ -223,3 +223,50 @@ func findLockSkill(skills []lockfile.Skill, name string) (lockfile.Skill, bool) 
 	}
 	return lockfile.Skill{}, false
 }
+
+// SkillInfo holds display data for a single installed skill.
+type SkillInfo struct {
+	Name    string
+	Source  string
+	Commit  string   // short SHA from lockfile; empty if not yet locked
+	Targets []string // effective targets
+}
+
+// List returns the skills declared in ski.toml, enriched with lock data.
+func (s Service) List() ([]SkillInfo, error) {
+	manifestPath := filepath.Join(s.ProjectDir, manifest.FileName)
+	doc, err := manifest.ReadFile(manifestPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("%s not found; run `ski init` first", manifestPath)
+		}
+		return nil, fmt.Errorf("read %s: %w", manifestPath, err)
+	}
+
+	lockPath := lockfile.Path(s.ProjectDir)
+	lf, err := readOrDefaultLockfile(lockPath)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", lockPath, err)
+	}
+
+	infos := make([]SkillInfo, 0, len(doc.Skills))
+	for _, ms := range doc.Skills {
+		info := SkillInfo{
+			Name:    ms.Name,
+			Source:  ms.Source,
+			Targets: doc.Targets,
+		}
+		if len(ms.Targets) > 0 {
+			info.Targets = ms.Targets
+		}
+		if lock, ok := findLockSkill(lf.Skills, ms.Name); ok {
+			if len(lock.Commit) >= 7 {
+				info.Commit = lock.Commit[:7]
+			} else {
+				info.Commit = lock.Commit
+			}
+		}
+		infos = append(infos, info)
+	}
+	return infos, nil
+}

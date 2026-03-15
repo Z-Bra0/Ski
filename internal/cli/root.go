@@ -40,7 +40,7 @@ func NewRootCmd(opts Options) *cobra.Command {
 	cmd.AddCommand(newAddCmd(opts))
 	cmd.AddCommand(newInitCmd(opts))
 	cmd.AddCommand(newInstallCmd(opts))
-	cmd.AddCommand(newListCmd())
+	cmd.AddCommand(newListCmd(opts))
 	cmd.AddCommand(newRemoveCmd())
 	cmd.AddCommand(newUpdateCmd())
 	return cmd
