@@ -4,9 +4,11 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+
+	"ski/internal/app"
 )
 
-func newUpdateCmd() *cobra.Command {
+func newUpdateCmd(opts Options) *cobra.Command {
 	var check bool
 
 	cmd := &cobra.Command{
@@ -14,13 +16,71 @@ func newUpdateCmd() *cobra.Command {
 		Short: "Update skills to newer upstream revisions",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if check {
-				return fmt.Errorf("not implemented: ski update --check")
+			cwd, err := opts.Getwd()
+			if err != nil {
+				return fmt.Errorf("resolve working directory: %w", err)
 			}
-			return fmt.Errorf("not implemented: ski update")
+			homeDir, err := opts.GetHomeDir()
+			if err != nil {
+				return fmt.Errorf("resolve home directory: %w", err)
+			}
+
+			name := ""
+			if len(args) == 1 {
+				name = args[0]
+			}
+
+			svc := app.Service{ProjectDir: cwd, HomeDir: homeDir}
+			if check {
+				updates, err := svc.CheckUpdates(name)
+				if err != nil {
+					return err
+				}
+				if len(updates) == 0 {
+					fmt.Fprintln(cmd.OutOrStdout(), "all skills up to date")
+					return nil
+				}
+				for _, update := range updates {
+					fmt.Fprintf(cmd.OutOrStdout(), "%s %s -> %s\n",
+						update.Name,
+						shortCommit(update.CurrentCommit),
+						shortCommit(update.LatestCommit),
+					)
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "%d skills can be updated\n", len(updates))
+				return nil
+			}
+
+			updates, err := svc.Update(name)
+			if err != nil {
+				return err
+			}
+			if len(updates) == 0 {
+				fmt.Fprintln(cmd.OutOrStdout(), "all skills up to date")
+				return nil
+			}
+			for _, update := range updates {
+				fmt.Fprintf(cmd.OutOrStdout(), "updated %s %s -> %s\n",
+					update.Name,
+					shortCommit(update.CurrentCommit),
+					shortCommit(update.LatestCommit),
+				)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "updated %d skills\n", len(updates))
+			return nil
 		},
 	}
 
 	cmd.Flags().BoolVar(&check, "check", false, "Report available updates without changing anything")
 	return cmd
+}
+
+func shortCommit(commit string) string {
+	if commit == "" {
+		return "(none)"
+	}
+	if len(commit) < 7 {
+		return commit
+	}
+	return commit[:7]
 }

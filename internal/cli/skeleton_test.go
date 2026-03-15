@@ -38,8 +38,8 @@ func TestSkeletonCommandsReturnNotImplemented(t *testing.T) {
 	}{
 		{name: "list", args: []string{"list"}, wantErr: "ski.toml not found"},
 		{name: "remove", args: []string{"remove", "repo-map"}, wantErr: "ski.toml not found"},
-		{name: "update", args: []string{"update"}, wantErr: "not implemented: ski update"},
-		{name: "update check", args: []string{"update", "--check"}, wantErr: "not implemented: ski update --check"},
+		{name: "update", args: []string{"update"}, wantErr: "ski.toml not found"},
+		{name: "update check", args: []string{"update", "--check"}, wantErr: "ski.toml not found"},
 	}
 
 	for _, tt := range tests {

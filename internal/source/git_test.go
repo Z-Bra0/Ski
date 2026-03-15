@@ -134,3 +134,33 @@ func TestGitDeriveName(t *testing.T) {
 		})
 	}
 }
+
+func TestIsCommitRef(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		ref  string
+		want bool
+	}{
+		{ref: "", want: false},
+		{ref: "main", want: false},
+		{ref: "v1.0.0", want: false},
+		{ref: "abc123", want: false},
+		{ref: "abc1234", want: true},
+		{ref: "ABC1234DEF", want: true},
+		{ref: "a1b2c3d4e5f6a7b8c9d0", want: true},
+		{ref: "0123456789012345678901234567890123456789", want: true},
+		{ref: "01234567890123456789012345678901234567890", want: false},
+		{ref: "abc123z", want: false},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.ref, func(t *testing.T) {
+			t.Parallel()
+			if got := IsCommitRef(tc.ref); got != tc.want {
+				t.Fatalf("IsCommitRef(%q) = %v, want %v", tc.ref, got, tc.want)
+			}
+		})
+	}
+}

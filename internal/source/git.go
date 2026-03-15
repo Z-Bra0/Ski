@@ -3,11 +3,15 @@ package source
 import (
 	"fmt"
 	"net/url"
+	"os/exec"
 	"path"
+	"regexp"
 	"strings"
 )
 
 const gitPrefix = "git:"
+
+var commitRefPattern = regexp.MustCompile(`^[0-9a-fA-F]{7,40}$`)
 
 type Git struct {
 	URL string
@@ -86,4 +90,36 @@ func (g Git) pathForName() string {
 	}
 
 	return g.URL
+}
+
+func ResolveGit(dir string, spec Git) (string, error) {
+	patterns := []string{"HEAD"}
+	if spec.Ref != "" {
+		patterns = []string{spec.Ref + "^{}", spec.Ref}
+	}
+
+	cmd := exec.Command("git", append([]string{"ls-remote", spec.URL}, patterns...)...)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("%s", strings.TrimSpace(string(output)))
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	for _, line := range lines {
+		fields := strings.Fields(line)
+		if len(fields) >= 1 && fields[0] != "" {
+			return fields[0], nil
+		}
+	}
+
+	refLabel := "HEAD"
+	if spec.Ref != "" {
+		refLabel = spec.Ref
+	}
+	return "", fmt.Errorf("resolve %q: no matching revision found", refLabel)
+}
+
+func IsCommitRef(ref string) bool {
+	return commitRefPattern.MatchString(ref)
 }

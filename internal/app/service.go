@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"ski/internal/lockfile"
 	"ski/internal/manifest"
@@ -17,6 +18,12 @@ import (
 type Service struct {
 	ProjectDir string
 	HomeDir    string
+}
+
+type UpdateInfo struct {
+	Name          string
+	CurrentCommit string
+	LatestCommit  string
 }
 
 // Init creates a new ski.toml in the project directory.
@@ -304,6 +311,14 @@ func unionStrings(a, b []string) []string {
 	return result
 }
 
+func effectiveTargetsForSkill(doc *manifest.Manifest, skill manifest.Skill) []string {
+	targets := append([]string(nil), doc.Targets...)
+	if len(skill.Targets) > 0 {
+		targets = append([]string(nil), skill.Targets...)
+	}
+	return targets
+}
+
 func findLockSkill(skills []lockfile.Skill, name string) (lockfile.Skill, bool) {
 	for _, s := range skills {
 		if s.Name == name {
@@ -311,6 +326,164 @@ func findLockSkill(skills []lockfile.Skill, name string) (lockfile.Skill, bool) 
 		}
 	}
 	return lockfile.Skill{}, false
+}
+
+func (s Service) CheckUpdates(name string) ([]UpdateInfo, error) {
+	doc, lf, err := s.loadProjectState()
+	if err != nil {
+		return nil, err
+	}
+
+	selected, err := selectSkills(doc, name)
+	if err != nil {
+		return nil, err
+	}
+
+	updates := make([]UpdateInfo, 0, len(selected))
+	for _, mSkill := range selected {
+		src, err := source.ParseGit(mSkill.Source)
+		if err != nil {
+			return nil, fmt.Errorf("skill %q: %w", mSkill.Name, err)
+		}
+		latestCommit, pinned, err := resolveUpdateCommit(s.ProjectDir, src)
+		if err != nil {
+			return nil, fmt.Errorf("skill %q: %w", mSkill.Name, err)
+		}
+		if pinned {
+			continue
+		}
+
+		currentCommit := ""
+		if locked, ok := findLockSkill(lf.Skills, mSkill.Name); ok {
+			currentCommit = locked.Commit
+		}
+
+		if currentCommit == latestCommit {
+			continue
+		}
+
+		updates = append(updates, UpdateInfo{
+			Name:          mSkill.Name,
+			CurrentCommit: currentCommit,
+			LatestCommit:  latestCommit,
+		})
+	}
+
+	return updates, nil
+}
+
+func (s Service) Update(name string) ([]UpdateInfo, error) {
+	doc, lf, err := s.loadProjectState()
+	if err != nil {
+		return nil, err
+	}
+
+	selected, err := selectSkills(doc, name)
+	if err != nil {
+		return nil, err
+	}
+
+	updates := make([]UpdateInfo, 0, len(selected))
+	for _, mSkill := range selected {
+		src, err := source.ParseGit(mSkill.Source)
+		if err != nil {
+			return nil, fmt.Errorf("skill %q: %w", mSkill.Name, err)
+		}
+		latestCommit, pinned, err := resolveUpdateCommit(s.ProjectDir, src)
+		if err != nil {
+			return nil, fmt.Errorf("skill %q: %w", mSkill.Name, err)
+		}
+		if pinned {
+			continue
+		}
+
+		locked, hasLock := findLockSkill(lf.Skills, mSkill.Name)
+		if hasLock && locked.Commit == latestCommit {
+			continue
+		}
+
+		src.Ref = latestCommit
+		stored, err := store.EnsureGit(s.ProjectDir, s.HomeDir, src, mSkill.Name)
+		if err != nil {
+			return nil, fmt.Errorf("skill %q: %w", mSkill.Name, err)
+		}
+
+		targets := effectiveTargetsForSkill(doc, mSkill)
+		if hasLock {
+			if err := target.UnlinkAll(s.ProjectDir, unionStrings(targets, locked.Targets), mSkill.Name); err != nil {
+				return nil, fmt.Errorf("skill %q: %w", mSkill.Name, err)
+			}
+		}
+		if err := target.LinkAll(s.ProjectDir, targets, mSkill.Name, stored.Path); err != nil {
+			return nil, fmt.Errorf("skill %q: %w", mSkill.Name, err)
+		}
+
+		upsertLockSkill(lf, lockfile.Skill{
+			Name:      mSkill.Name,
+			Source:    mSkill.Source,
+			Commit:    stored.Commit,
+			Integrity: stored.Integrity,
+			Targets:   targets,
+		})
+		updates = append(updates, UpdateInfo{
+			Name:          mSkill.Name,
+			CurrentCommit: locked.Commit,
+			LatestCommit:  stored.Commit,
+		})
+	}
+
+	if len(updates) == 0 {
+		return updates, nil
+	}
+
+	lockPath := lockfile.Path(s.ProjectDir)
+	if err := lockfile.WriteFile(lockPath, *lf); err != nil {
+		return nil, fmt.Errorf("write %s: %w", lockPath, err)
+	}
+
+	return updates, nil
+}
+
+func (s Service) loadProjectState() (*manifest.Manifest, *lockfile.Lockfile, error) {
+	manifestPath := filepath.Join(s.ProjectDir, manifest.FileName)
+	doc, err := manifest.ReadFile(manifestPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil, fmt.Errorf("%s not found; run `ski init` first", manifestPath)
+		}
+		return nil, nil, fmt.Errorf("read %s: %w", manifestPath, err)
+	}
+
+	lockPath := lockfile.Path(s.ProjectDir)
+	lf, err := readOrDefaultLockfile(lockPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read %s: %w", lockPath, err)
+	}
+
+	return doc, lf, nil
+}
+
+func selectSkills(doc *manifest.Manifest, name string) ([]manifest.Skill, error) {
+	if name == "" {
+		return doc.Skills, nil
+	}
+
+	skill, ok := findSkillByName(doc.Skills, name)
+	if !ok {
+		return nil, fmt.Errorf("skill %q not found in %s", name, manifest.FileName)
+	}
+	return []manifest.Skill{skill}, nil
+}
+
+func resolveUpdateCommit(projectDir string, src source.Git) (string, bool, error) {
+	commit, err := source.ResolveGit(projectDir, src)
+	if err == nil {
+		return commit, false, nil
+	}
+	if src.Ref != "" && source.IsCommitRef(src.Ref) && strings.Contains(err.Error(), "no matching revision found") {
+		return "", true, nil
+	}
+	return "", false, err
 }
 
 // SkillInfo holds display data for a single installed skill.
