@@ -37,7 +37,7 @@ func TestSkeletonCommandsReturnNotImplemented(t *testing.T) {
 		wantErr string
 	}{
 		{name: "list", args: []string{"list"}, wantErr: "ski.toml not found"},
-		{name: "remove", args: []string{"remove", "repo-map"}, wantErr: "not implemented: ski remove"},
+		{name: "remove", args: []string{"remove", "repo-map"}, wantErr: "ski.toml not found"},
 		{name: "update", args: []string{"update"}, wantErr: "not implemented: ski update"},
 		{name: "update check", args: []string{"update", "--check"}, wantErr: "not implemented: ski update --check"},
 	}

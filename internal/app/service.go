@@ -215,6 +215,95 @@ func (s Service) Install() (int, error) {
 	return count, nil
 }
 
+// Remove deletes a skill from ski.toml, ski.lock.json, and all target symlinks.
+// The store cache entry is left intact for potential reuse.
+func (s Service) Remove(name string) error {
+	manifestPath := filepath.Join(s.ProjectDir, manifest.FileName)
+	doc, err := manifest.ReadFile(manifestPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("%s not found; run `ski init` first", manifestPath)
+		}
+		return fmt.Errorf("read %s: %w", manifestPath, err)
+	}
+
+	ms, ok := findSkillByName(doc.Skills, name)
+	if !ok {
+		return fmt.Errorf("skill %q not found in %s", name, manifest.FileName)
+	}
+
+	// Effective manifest targets for this skill.
+	effectiveTargets := append([]string(nil), doc.Targets...)
+	if len(ms.Targets) > 0 {
+		effectiveTargets = ms.Targets
+	}
+
+	// Union with lock targets so we clean up even if targets changed since install.
+	lockPath := lockfile.Path(s.ProjectDir)
+	lf, err := readOrDefaultLockfile(lockPath)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", lockPath, err)
+	}
+	if lock, ok := findLockSkill(lf.Skills, name); ok {
+		effectiveTargets = unionStrings(effectiveTargets, lock.Targets)
+	}
+
+	// Write metadata first so that if either write fails the symlinks still
+	// exist and the project remains in a consistent, retryable state.
+	doc.Skills = removeManifestSkill(doc.Skills, name)
+	if err := manifest.WriteFile(manifestPath, *doc); err != nil {
+		return fmt.Errorf("write %s: %w", manifestPath, err)
+	}
+
+	lf.Skills = removeLockSkill(lf.Skills, name)
+	if err := lockfile.WriteFile(lockPath, *lf); err != nil {
+		return fmt.Errorf("write %s: %w", lockPath, err)
+	}
+
+	// Unlink last: if this fails, metadata is already clean and the orphaned
+	// symlink points to still-valid store data — user can remove it manually
+	// or re-run ski install to reconcile.
+	if err := target.UnlinkAll(s.ProjectDir, effectiveTargets, name); err != nil {
+		return fmt.Errorf("remove symlinks: %w", err)
+	}
+
+	return nil
+}
+
+func removeManifestSkill(skills []manifest.Skill, name string) []manifest.Skill {
+	out := make([]manifest.Skill, 0, len(skills))
+	for _, s := range skills {
+		if s.Name != name {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func removeLockSkill(skills []lockfile.Skill, name string) []lockfile.Skill {
+	out := make([]lockfile.Skill, 0, len(skills))
+	for _, s := range skills {
+		if s.Name != name {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func unionStrings(a, b []string) []string {
+	seen := make(map[string]struct{}, len(a))
+	result := append([]string(nil), a...)
+	for _, s := range a {
+		seen[s] = struct{}{}
+	}
+	for _, s := range b {
+		if _, ok := seen[s]; !ok {
+			result = append(result, s)
+		}
+	}
+	return result
+}
+
 func findLockSkill(skills []lockfile.Skill, name string) (lockfile.Skill, bool) {
 	for _, s := range skills {
 		if s.Name == name {

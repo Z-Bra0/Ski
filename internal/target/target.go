@@ -56,6 +56,37 @@ func Link(projectRoot, target, name, storePath string) error {
 	return nil
 }
 
+func UnlinkAll(projectRoot string, targets []string, name string) error {
+	for _, t := range targets {
+		if err := Unlink(projectRoot, t, name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func Unlink(projectRoot, target, name string) error {
+	dir, err := SkillDir(projectRoot, target)
+	if err != nil {
+		return err
+	}
+	linkPath := filepath.Join(dir, name)
+	info, err := os.Lstat(linkPath)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("lstat %s: %w", linkPath, err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		return fmt.Errorf("%s is not a symlink; remove it manually", linkPath)
+	}
+	if err := os.Remove(linkPath); err != nil {
+		return fmt.Errorf("remove %s: %w", linkPath, err)
+	}
+	return nil
+}
+
 func SkillDir(projectRoot, target string) (string, error) {
 	rel, ok := dirs[target]
 	if !ok {
