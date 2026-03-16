@@ -6,22 +6,26 @@ import (
 	"os/exec"
 	"path"
 	"regexp"
+	"slices"
 	"strings"
 )
 
 const gitPrefix = "git:"
+const skillSelectorSeparator = "##"
 
 var commitRefPattern = regexp.MustCompile(`^[0-9a-fA-F]{7,40}$`)
+var skillSelectorPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
 type Git struct {
-	URL string
-	Ref string
+	URL    string
+	Ref    string
+	Skills []string
 }
 
 func ParseGit(raw string) (Git, error) {
 	raw = strings.TrimSpace(raw)
 	if !strings.HasPrefix(raw, gitPrefix) {
-		return Git{}, fmt.Errorf("unsupported source %q: expected git:<url>[@ref]", raw)
+		return Git{}, fmt.Errorf("unsupported source %q: expected git:<url>[@ref][##skill[,skill...]]", raw)
 	}
 
 	spec := strings.TrimSpace(strings.TrimPrefix(raw, gitPrefix))
@@ -32,6 +36,11 @@ func ParseGit(raw string) (Git, error) {
 		return Git{}, fmt.Errorf("invalid git source %q: whitespace is not allowed", raw)
 	}
 
+	spec, selectors, hasSelector := splitSkillSelectors(spec)
+	if hasSelector && selectors == "" {
+		return Git{}, fmt.Errorf("invalid git source %q: empty skill selector", raw)
+	}
+
 	gitURL, ref := splitGitSpec(spec)
 	if gitURL == "" {
 		return Git{}, fmt.Errorf("invalid git source %q: missing url", raw)
@@ -40,14 +49,36 @@ func ParseGit(raw string) (Git, error) {
 		return Git{}, fmt.Errorf("invalid git source %q: empty ref", raw)
 	}
 
-	return Git{URL: gitURL, Ref: ref}, nil
+	gitURL = unescapeGitComponent(gitURL)
+	ref = unescapeGitComponent(ref)
+
+	skills, err := parseSkillSelectors(selectors)
+	if err != nil {
+		return Git{}, fmt.Errorf("invalid git source %q: %w", raw, err)
+	}
+
+	return Git{URL: gitURL, Ref: ref, Skills: skills}, nil
 }
 
 func (g Git) String() string {
+	var b strings.Builder
+	b.WriteString(gitPrefix)
+	b.WriteString(escapeGitComponent(g.URL))
 	if g.Ref == "" {
-		return gitPrefix + g.URL
+		if len(g.Skills) == 0 {
+			return b.String()
+		}
+		b.WriteString(skillSelectorSeparator)
+		b.WriteString(strings.Join(normalizeSkillSelectors(g.Skills), ","))
+		return b.String()
 	}
-	return gitPrefix + g.URL + "@" + g.Ref
+	b.WriteString("@")
+	b.WriteString(escapeGitComponent(g.Ref))
+	if len(g.Skills) > 0 {
+		b.WriteString(skillSelectorSeparator)
+		b.WriteString(strings.Join(normalizeSkillSelectors(g.Skills), ","))
+	}
+	return b.String()
 }
 
 func (g Git) DeriveName() (string, error) {
@@ -65,7 +96,7 @@ func (g Git) DeriveName() (string, error) {
 }
 
 func splitGitSpec(spec string) (gitURL string, ref string) {
-	at := strings.LastIndex(spec, "@")
+	at := lastUnescapedIndex(spec, "@")
 	if at <= 0 || at == len(spec)-1 {
 		return spec, ""
 	}
@@ -76,6 +107,14 @@ func splitGitSpec(spec string) (gitURL string, ref string) {
 	}
 
 	return spec[:at], suffix
+}
+
+func splitSkillSelectors(spec string) (base string, selectors string, hasSelector bool) {
+	idx := lastUnescapedIndex(spec, skillSelectorSeparator)
+	if idx < 0 {
+		return spec, "", false
+	}
+	return spec[:idx], spec[idx+len(skillSelectorSeparator):], true
 }
 
 func (g Git) pathForName() string {
@@ -122,4 +161,118 @@ func ResolveGit(dir string, spec Git) (string, error) {
 
 func IsCommitRef(ref string) bool {
 	return commitRefPattern.MatchString(ref)
+}
+
+func (g Git) WithSkills(skills []string) Git {
+	g.Skills = normalizeSkillSelectors(skills)
+	return g
+}
+
+func (g Git) WithoutSkills() Git {
+	g.Skills = nil
+	return g
+}
+
+func parseSkillSelectors(raw string) ([]string, error) {
+	if raw == "" {
+		return nil, nil
+	}
+
+	parts := strings.Split(raw, ",")
+	seen := make(map[string]struct{}, len(parts))
+	skills := make([]string, 0, len(parts))
+	for _, part := range parts {
+		name := strings.TrimSpace(part)
+		if name == "" {
+			return nil, fmt.Errorf("empty skill selector")
+		}
+		if !skillSelectorPattern.MatchString(name) {
+			return nil, fmt.Errorf("invalid skill selector %q", name)
+		}
+		if _, ok := seen[name]; ok {
+			return nil, fmt.Errorf("duplicate skill selector %q", name)
+		}
+		seen[name] = struct{}{}
+		skills = append(skills, name)
+	}
+	return normalizeSkillSelectors(skills), nil
+}
+
+func normalizeSkillSelectors(skills []string) []string {
+	if len(skills) == 0 {
+		return nil
+	}
+	out := append([]string(nil), skills...)
+	slices.Sort(out)
+	return out
+}
+
+func lastUnescapedIndex(s string, sep string) int {
+	if len(sep) == 0 || len(s) < len(sep) {
+		return -1
+	}
+
+	for i := len(s) - len(sep); i >= 0; i-- {
+		if s[i:i+len(sep)] != sep {
+			continue
+		}
+		escaped := false
+		for j := 0; j < len(sep); j++ {
+			if isEscapedAt(s, i+j) {
+				escaped = true
+				break
+			}
+		}
+		if !escaped {
+			return i
+		}
+	}
+
+	return -1
+}
+
+func isEscapedAt(s string, idx int) bool {
+	backslashes := 0
+	for i := idx - 1; i >= 0 && s[i] == '\\'; i-- {
+		backslashes++
+	}
+	return backslashes%2 == 1
+}
+
+func escapeGitComponent(raw string) string {
+	if raw == "" {
+		return ""
+	}
+
+	var b strings.Builder
+	b.Grow(len(raw))
+	for _, ch := range raw {
+		switch ch {
+		case '\\', '@', '#':
+			b.WriteByte('\\')
+		}
+		b.WriteRune(ch)
+	}
+	return b.String()
+}
+
+func unescapeGitComponent(raw string) string {
+	if raw == "" {
+		return ""
+	}
+
+	var b strings.Builder
+	b.Grow(len(raw))
+	for i := 0; i < len(raw); i++ {
+		if raw[i] == '\\' && i+1 < len(raw) {
+			switch raw[i+1] {
+			case '\\', '@', '#':
+				b.WriteByte(raw[i+1])
+				i++
+				continue
+			}
+		}
+		b.WriteByte(raw[i])
+	}
+	return b.String()
 }

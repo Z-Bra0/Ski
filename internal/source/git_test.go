@@ -9,11 +9,12 @@ func TestParseGit(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name    string
-		raw     string
-		wantURL string
-		wantRef string
-		wantErr string
+		name       string
+		raw        string
+		wantURL    string
+		wantRef    string
+		wantSkills []string
+		wantErr    string
 	}{
 		{
 			name:    "https with ref",
@@ -37,10 +38,38 @@ func TestParseGit(t *testing.T) {
 			raw:     "git:ssh://git@github.com/acme/repo-map.git",
 			wantURL: "ssh://git@github.com/acme/repo-map.git",
 		},
+			{
+				name:       "with skill selectors",
+				raw:        "git:https://github.com/acme/repo-map.git@v1.0.0##beta-skill,alpha-skill",
+				wantURL:    "https://github.com/acme/repo-map.git",
+				wantRef:    "v1.0.0",
+				wantSkills: []string{"alpha-skill", "beta-skill"},
+			},
+			{
+				name:    "single hash stays in url path",
+				raw:     "git:/tmp/skill#pack",
+				wantURL: "/tmp/skill#pack",
+			},
+		{
+			name:       "url fragment plus selectors",
+			raw:        "git:https://example.com/repo#fragment.git##alpha-skill",
+			wantURL:    "https://example.com/repo#fragment.git",
+			wantSkills: []string{"alpha-skill"},
+		},
+		{
+			name:    "escaped double hash stays in local path",
+			raw:     `git:/tmp/example/repo\#\#pack`,
+			wantURL: "/tmp/example/repo##pack",
+		},
+		{
+			name:    "escaped at sign stays in local path",
+			raw:     `git:/tmp/example/repo\@pack`,
+			wantURL: "/tmp/example/repo@pack",
+		},
 		{
 			name:    "missing prefix",
 			raw:     "github:acme/repo-map",
-			wantErr: "expected git:<url>[@ref]",
+			wantErr: "expected git:<url>[@ref][##skill[,skill...]]",
 		},
 		{
 			name:    "missing url",
@@ -52,6 +81,16 @@ func TestParseGit(t *testing.T) {
 			raw:     "git:https://github.com/acme/repo-map.git@",
 			wantErr: "empty ref",
 		},
+			{
+				name:    "empty selector",
+				raw:     "git:https://github.com/acme/repo-map.git##",
+				wantErr: "empty skill selector",
+			},
+			{
+				name:    "invalid selector",
+				raw:     "git:https://github.com/acme/repo-map.git##bad_name",
+				wantErr: "invalid skill selector",
+			},
 	}
 
 	for _, tc := range tests {
@@ -72,10 +111,57 @@ func TestParseGit(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ParseGit() error = %v", err)
 			}
-			if got.URL != tc.wantURL || got.Ref != tc.wantRef {
-				t.Fatalf("ParseGit() = %#v, want URL=%q Ref=%q", got, tc.wantURL, tc.wantRef)
+			if got.URL != tc.wantURL || got.Ref != tc.wantRef || !equalStrings(got.Skills, tc.wantSkills) {
+				t.Fatalf("ParseGit() = %#v, want URL=%q Ref=%q Skills=%#v", got, tc.wantURL, tc.wantRef, tc.wantSkills)
 			}
 		})
+	}
+}
+
+func TestGitStringIncludesSortedSelectors(t *testing.T) {
+	t.Parallel()
+
+	got := (Git{
+		URL:    "https://github.com/acme/repo-map.git",
+		Ref:    "v1.0.0",
+		Skills: []string{"beta-skill", "alpha-skill"},
+	}).String()
+
+	want := "git:https://github.com/acme/repo-map.git@v1.0.0##alpha-skill,beta-skill"
+	if got != want {
+		t.Fatalf("String() = %q, want %q", got, want)
+	}
+}
+
+func TestGitStringEscapesLiteralSeparators(t *testing.T) {
+	t.Parallel()
+
+	got := (Git{
+		URL: "git@github.com:acme/repo##pack.git",
+		Ref: "release#1",
+	}).String()
+
+	want := `git:git\@github.com:acme/repo\#\#pack.git@release\#1`
+	if got != want {
+		t.Fatalf("String() = %q, want %q", got, want)
+	}
+}
+
+func TestGitRoundTripWithEscapedURLSeparators(t *testing.T) {
+	t.Parallel()
+
+	original := Git{
+		URL:    "/tmp/example/repo##pack",
+		Ref:    "release@2026#1",
+		Skills: []string{"beta-skill", "alpha-skill"},
+	}
+
+	parsed, err := ParseGit(original.String())
+	if err != nil {
+		t.Fatalf("ParseGit(String()) error = %v", err)
+	}
+	if parsed.URL != original.URL || parsed.Ref != original.Ref || !equalStrings(parsed.Skills, []string{"alpha-skill", "beta-skill"}) {
+		t.Fatalf("ParseGit(String()) = %#v, want %#v", parsed, original.WithSkills([]string{"alpha-skill", "beta-skill"}))
 	}
 }
 
@@ -163,4 +249,16 @@ func TestIsCommitRef(t *testing.T) {
 			}
 		})
 	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

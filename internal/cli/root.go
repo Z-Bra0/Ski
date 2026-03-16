@@ -10,8 +10,10 @@ import (
 type Options struct {
 	Getwd      func() (string, error)
 	GetHomeDir func() (string, error)
+	Stdin      io.Reader
 	Stdout     io.Writer
 	Stderr     io.Writer
+	IsTTY      func() bool
 }
 
 func NewRootCmd(opts Options) *cobra.Command {
@@ -21,11 +23,27 @@ func NewRootCmd(opts Options) *cobra.Command {
 	if opts.GetHomeDir == nil {
 		opts.GetHomeDir = os.UserHomeDir
 	}
+	if opts.Stdin == nil {
+		opts.Stdin = os.Stdin
+	}
 	if opts.Stdout == nil {
 		opts.Stdout = io.Discard
 	}
 	if opts.Stderr == nil {
 		opts.Stderr = io.Discard
+	}
+	if opts.IsTTY == nil {
+		opts.IsTTY = func() bool {
+			stdinInfo, err := os.Stdin.Stat()
+			if err != nil || stdinInfo.Mode()&os.ModeCharDevice == 0 {
+				return false
+			}
+			stdoutInfo, err := os.Stdout.Stat()
+			if err != nil || stdoutInfo.Mode()&os.ModeCharDevice == 0 {
+				return false
+			}
+			return true
+		}
 	}
 
 	cmd := &cobra.Command{
@@ -34,6 +52,7 @@ func NewRootCmd(opts Options) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
+	cmd.SetIn(opts.Stdin)
 	cmd.SetOut(opts.Stdout)
 	cmd.SetErr(opts.Stderr)
 

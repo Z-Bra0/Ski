@@ -19,74 +19,300 @@ import (
 
 var renameDir = os.Rename
 
+const maxSkillDiscoveryDepth = 3
+
 type Result struct {
 	Commit    string
 	Integrity string
 	Path      string
 }
 
-func EnsureGit(projectRoot, homeDir string, spec source.Git, expectedName string) (Result, error) {
+type RepoResult struct {
+	Commit string
+	Root   string
+	Skills []DiscoveredSkill
+}
+
+type DiscoveredSkill struct {
+	Name         string
+	RelativePath string
+	Path         string
+}
+
+func DiscoverGit(projectRoot, homeDir string, spec source.Git) (RepoResult, error) {
 	storeKey, err := spec.DeriveName()
 	if err != nil {
-		return Result{}, err
+		return RepoResult{}, err
+	}
+
+	if commit, ok := resolveStoreCommit(projectRoot, spec); ok {
+		storePath := filepath.Join(homeDir, ".ski", "store", "git", storeKey, commit)
+		repo, err := loadStoredRepo(storePath, commit)
+		if err == nil {
+			return repo, nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return RepoResult{}, err
+		}
 	}
 
 	tmpRoot, err := os.MkdirTemp("", "ski-git-*")
 	if err != nil {
-		return Result{}, fmt.Errorf("create temp dir: %w", err)
+		return RepoResult{}, fmt.Errorf("create temp dir: %w", err)
 	}
 	defer os.RemoveAll(tmpRoot)
 
 	checkoutDir := filepath.Join(tmpRoot, "checkout")
 	if err := runGit(projectRoot, "clone", "--quiet", spec.URL, checkoutDir); err != nil {
-		return Result{}, fmt.Errorf("clone %q: %w", spec.URL, err)
+		return RepoResult{}, fmt.Errorf("clone %q: %w", spec.URL, err)
 	}
 
 	if spec.Ref != "" {
 		if err := runGit(projectRoot, "-C", checkoutDir, "-c", "advice.detachedHead=false", "checkout", "--quiet", spec.Ref); err != nil {
-			return Result{}, fmt.Errorf("checkout %q: %w", spec.Ref, err)
+			return RepoResult{}, fmt.Errorf("checkout %q: %w", spec.Ref, err)
 		}
 	}
 
 	commit, err := gitOutput(projectRoot, "-C", checkoutDir, "rev-parse", "HEAD")
 	if err != nil {
-		return Result{}, fmt.Errorf("resolve commit: %w", err)
+		return RepoResult{}, fmt.Errorf("resolve commit: %w", err)
 	}
 
 	storePath := filepath.Join(homeDir, ".ski", "store", "git", storeKey, commit)
-	if _, err := os.Stat(storePath); err == nil {
-		if _, err := skill.ValidateDir(storePath, expectedName); err != nil {
-			return Result{}, err
-		}
-		integrity, err := HashDir(storePath)
-		if err != nil {
-			return Result{}, fmt.Errorf("hash %s: %w", storePath, err)
-		}
-		return Result{Commit: commit, Integrity: integrity, Path: storePath}, nil
-	} else if !os.IsNotExist(err) {
-		return Result{}, fmt.Errorf("stat %s: %w", storePath, err)
+	repo, err := loadStoredRepo(storePath, commit)
+	if err == nil {
+		return repo, nil
+	}
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return RepoResult{}, err
 	}
 
-	if _, err := skill.ValidateDir(checkoutDir, expectedName); err != nil {
-		return Result{}, err
+	skills, err := discoverSkills(checkoutDir)
+	if err != nil {
+		return RepoResult{}, err
+	}
+	if len(skills) == 0 {
+		return RepoResult{}, fmt.Errorf("no skills found in repository")
 	}
 
 	if err := os.MkdirAll(filepath.Dir(storePath), 0o755); err != nil {
-		return Result{}, fmt.Errorf("mkdir %s: %w", filepath.Dir(storePath), err)
+		return RepoResult{}, fmt.Errorf("mkdir %s: %w", filepath.Dir(storePath), err)
 	}
 	if err := os.RemoveAll(filepath.Join(checkoutDir, ".git")); err != nil {
-		return Result{}, fmt.Errorf("remove git metadata: %w", err)
+		return RepoResult{}, fmt.Errorf("remove git metadata: %w", err)
 	}
 	if err := moveDirIntoStore(checkoutDir, storePath); err != nil {
-		return Result{}, fmt.Errorf("move checkout into store: %w", err)
+		return RepoResult{}, fmt.Errorf("move checkout into store: %w", err)
 	}
 
-	integrity, err := HashDir(storePath)
+	return buildRepoResult(storePath, commit, skills), nil
+}
+
+func EnsureGit(projectRoot, homeDir string, spec source.Git, expectedName string) (Result, error) {
+	repo, err := DiscoverGit(projectRoot, homeDir, spec)
 	if err != nil {
-		return Result{}, fmt.Errorf("hash %s: %w", storePath, err)
+		return Result{}, err
 	}
 
-	return Result{Commit: commit, Integrity: integrity, Path: storePath}, nil
+	selected, err := resolveDiscoveredSkill(repo.Skills, spec, expectedName)
+	if err != nil {
+		return Result{}, err
+	}
+
+	integrity, err := HashDir(repo.Root)
+	if err != nil {
+		return Result{}, fmt.Errorf("hash %s: %w", repo.Root, err)
+	}
+
+	return Result{Commit: repo.Commit, Integrity: integrity, Path: selected.Path}, nil
+}
+
+func FindGit(homeDir string, spec source.Git, commit string, expectedName string) (Result, error) {
+	storeKey, err := spec.DeriveName()
+	if err != nil {
+		return Result{}, err
+	}
+
+	storePath := filepath.Join(homeDir, ".ski", "store", "git", storeKey, commit)
+	repo, err := loadStoredRepo(storePath, commit)
+	if err != nil {
+		return Result{}, err
+	}
+
+	selected, err := resolveDiscoveredSkill(repo.Skills, spec, expectedName)
+	if err != nil {
+		return Result{}, err
+	}
+
+	integrity, err := HashDir(repo.Root)
+	if err != nil {
+		return Result{}, fmt.Errorf("hash %s: %w", repo.Root, err)
+	}
+
+	return Result{Commit: commit, Integrity: integrity, Path: selected.Path}, nil
+}
+
+func resolveStoreCommit(projectRoot string, spec source.Git) (string, bool) {
+	if spec.Ref != "" && source.IsCommitRef(spec.Ref) {
+		return spec.Ref, true
+	}
+
+	commit, err := source.ResolveGit(projectRoot, spec.WithoutSkills())
+	if err != nil {
+		return "", false
+	}
+	return commit, true
+}
+
+func loadStoredRepo(storePath, commit string) (RepoResult, error) {
+	info, err := os.Stat(storePath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return RepoResult{}, err
+		}
+		return RepoResult{}, fmt.Errorf("stat %s: %w", storePath, err)
+	}
+	if !info.IsDir() {
+		return RepoResult{}, fmt.Errorf("store path %s is not a directory", storePath)
+	}
+
+	skills, err := discoverSkills(storePath)
+	if err != nil {
+		return RepoResult{}, err
+	}
+	if len(skills) == 0 {
+		return RepoResult{}, fmt.Errorf("no skills found in store snapshot %s", storePath)
+	}
+	return buildRepoResult(storePath, commit, skills), nil
+}
+
+func buildRepoResult(root, commit string, skills []DiscoveredSkill) RepoResult {
+	out := make([]DiscoveredSkill, 0, len(skills))
+	for _, discovered := range skills {
+		rel := discovered.RelativePath
+		if rel == "" {
+			rel = "."
+		}
+		out = append(out, DiscoveredSkill{
+			Name:         discovered.Name,
+			RelativePath: rel,
+			Path:         filepath.Join(root, rel),
+		})
+	}
+	return RepoResult{Commit: commit, Root: root, Skills: out}
+}
+
+func discoverSkills(root string) ([]DiscoveredSkill, error) {
+	skills := make([]DiscoveredSkill, 0)
+	seen := make(map[string]string)
+
+	var walk func(dir string, depth int) error
+	walk = func(dir string, depth int) error {
+		if meta, found, err := loadSkillMetadata(dir); err != nil {
+			return err
+		} else if found {
+			rel, err := filepath.Rel(root, dir)
+			if err != nil {
+				return fmt.Errorf("derive relative path for %s: %w", dir, err)
+			}
+			if previous, ok := seen[meta.Name]; ok {
+				return fmt.Errorf("duplicate skill name %q found at %s and %s", meta.Name, previous, rel)
+			}
+			seen[meta.Name] = rel
+			skills = append(skills, DiscoveredSkill{
+				Name:         meta.Name,
+				RelativePath: rel,
+				Path:         dir,
+			})
+		}
+
+		if depth >= maxSkillDiscoveryDepth {
+			return nil
+		}
+
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", dir, err)
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			if shouldSkipDir(entry.Name()) {
+				continue
+			}
+			if err := walk(filepath.Join(dir, entry.Name()), depth+1); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	if err := walk(root, 0); err != nil {
+		return nil, err
+	}
+
+	slices.SortFunc(skills, func(a, b DiscoveredSkill) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+	return skills, nil
+}
+
+func loadSkillMetadata(dir string) (*skill.Metadata, bool, error) {
+	path := filepath.Join(dir, skill.FileName)
+	if _, err := os.Stat(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("stat %s: %w", path, err)
+	}
+
+	meta, err := skill.ValidateDir(dir, "")
+	if err != nil {
+		return nil, false, err
+	}
+	return meta, true, nil
+}
+
+func resolveDiscoveredSkill(skills []DiscoveredSkill, spec source.Git, expectedName string) (DiscoveredSkill, error) {
+	if len(spec.Skills) > 1 {
+		return DiscoveredSkill{}, fmt.Errorf("source %q selects multiple skills; add one manifest entry per skill", spec.String())
+	}
+
+	if len(spec.Skills) == 1 {
+		for _, discovered := range skills {
+			if discovered.Name == spec.Skills[0] {
+				return discovered, nil
+			}
+		}
+		return DiscoveredSkill{}, fmt.Errorf("skill %q not found in repository (available: %s)", spec.Skills[0], strings.Join(discoveredSkillNames(skills), ", "))
+	}
+
+	switch len(skills) {
+	case 0:
+		return DiscoveredSkill{}, fmt.Errorf("no skills found in repository")
+	case 1:
+		return skills[0], nil
+	default:
+		for _, discovered := range skills {
+			if expectedName != "" && discovered.Name == expectedName {
+				return discovered, nil
+			}
+		}
+		return DiscoveredSkill{}, fmt.Errorf("multiple skills found in repository: %s", strings.Join(discoveredSkillNames(skills), ", "))
+	}
+}
+
+func discoveredSkillNames(skills []DiscoveredSkill) []string {
+	names := make([]string, 0, len(skills))
+	for _, discovered := range skills {
+		names = append(names, discovered.Name)
+	}
+	return names
+}
+
+func shouldSkipDir(name string) bool {
+	return name == ".git" || name == "node_modules" || strings.HasPrefix(name, ".")
 }
 
 func moveDirIntoStore(src, dst string) error {

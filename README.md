@@ -27,6 +27,10 @@ ski install                      # restore from ski.toml + ski.lock.json
 ski list                         # show installed skills
 ```
 
+If a repo contains multiple skills, `ski add` prompts in a terminal. In non-interactive mode, use `git:<url>##skill-a,skill-b` or `ski add <source> --all`.
+
+If the repo URL or local path contains a literal `@`, `#`, or `\`, escape it in the source string as `\@`, `\#`, or `\\`. Example: `git:/tmp/skill\#\#pack`.
+
 `targets = ["claude"]` in `ski.toml` means project-local installation into `./.claude/skills/`. v1 does not write to `~/.claude/skills/` or other global agent directories.
 
 ---
