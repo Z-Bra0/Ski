@@ -177,7 +177,6 @@ func (s Service) Install() (int, error) {
 		return 0, fmt.Errorf("read %s: %w", lockPath, err)
 	}
 
-	effectiveTargets := append([]string(nil), doc.Targets...)
 	count := 0
 	for _, mSkill := range doc.Skills {
 		src, err := source.ParseGit(mSkill.Source)
@@ -201,6 +200,7 @@ func (s Service) Install() (int, error) {
 				mSkill.Name, stored.Integrity, lockedEntry.Integrity)
 		}
 
+		effectiveTargets := effectiveTargetsForSkill(doc, mSkill)
 		if err := target.LinkAll(s.ProjectDir, effectiveTargets, mSkill.Name, stored.Path); err != nil {
 			return count, fmt.Errorf("skill %q: %w", mSkill.Name, err)
 		}

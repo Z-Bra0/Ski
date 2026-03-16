@@ -167,6 +167,62 @@ func TestInstallWithoutLockfileGeneratesOne(t *testing.T) {
 	}
 }
 
+func TestInstallUsesPerSkillTargetOverrides(t *testing.T) {
+	t.Parallel()
+
+	repoPath, commit := createGitRepo(t, "repo-map", "repo-map")
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	if err := manifest.WriteFile(filepath.Join(projectDir, manifest.FileName), manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills: []manifest.Skill{
+			{
+				Name:    "repo-map",
+				Source:  "git:" + repoPath + "@v1.0.0",
+				Targets: []string{"codex"},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("WriteFile(manifest) error = %v", err)
+	}
+
+	installCmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	installCmd.SetArgs([]string{"install"})
+	if err := installCmd.Execute(); err != nil {
+		t.Fatalf("install Execute() error = %v", err)
+	}
+
+	codexLink := filepath.Join(projectDir, ".codex", "skills", "repo-map")
+	targetPath, err := os.Readlink(codexLink)
+	if err != nil {
+		t.Fatalf("Readlink(codex) error = %v", err)
+	}
+	wantStore := filepath.Join(homeDir, ".ski", "store", "git", "repo-map", commit)
+	if targetPath != wantStore {
+		t.Fatalf("codex symlink target = %q, want %q", targetPath, wantStore)
+	}
+
+	claudeLink := filepath.Join(projectDir, ".claude", "skills", "repo-map")
+	if _, err := os.Lstat(claudeLink); !os.IsNotExist(err) {
+		t.Fatalf("claude link exists = %v, want missing", err)
+	}
+
+	lf, err := lockfile.ReadFile(filepath.Join(projectDir, lockfile.FileName))
+	if err != nil {
+		t.Fatalf("ReadFile(lockfile) error = %v", err)
+	}
+	if !reflect.DeepEqual(lf.Skills[0].Targets, []string{"codex"}) {
+		t.Fatalf("lockfile targets = %#v, want [codex]", lf.Skills[0].Targets)
+	}
+}
+
 func TestInstallFailsWithoutManifest(t *testing.T) {
 	t.Parallel()
 
