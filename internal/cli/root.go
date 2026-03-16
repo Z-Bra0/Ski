@@ -38,6 +38,7 @@ func NewRootCmd(opts Options) *cobra.Command {
 	cmd.SetErr(opts.Stderr)
 
 	cmd.AddCommand(newAddCmd(opts))
+	cmd.AddCommand(newDoctorCmd(opts))
 	cmd.AddCommand(newInitCmd(opts))
 	cmd.AddCommand(newInstallCmd(opts))
 	cmd.AddCommand(newListCmd(opts))

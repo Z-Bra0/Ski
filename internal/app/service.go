@@ -26,6 +26,18 @@ type UpdateInfo struct {
 	LatestCommit  string
 }
 
+type DoctorFinding struct {
+	Skill   string
+	Message string
+}
+
+func (f DoctorFinding) String() string {
+	if f.Skill == "" {
+		return f.Message
+	}
+	return fmt.Sprintf("%s: %s", f.Skill, f.Message)
+}
+
 // Init creates a new ski.toml in the project directory.
 // Returns the path of the created manifest.
 func (s Service) Init() (string, error) {
@@ -326,6 +338,221 @@ func findLockSkill(skills []lockfile.Skill, name string) (lockfile.Skill, bool) 
 		}
 	}
 	return lockfile.Skill{}, false
+}
+
+// Doctor checks for project-state inconsistencies across the manifest,
+// lockfile, store, and linked target directories.
+func (s Service) Doctor() ([]DoctorFinding, error) {
+	doc, lf, err := s.loadProjectState()
+	if err != nil {
+		return nil, err
+	}
+
+	lockByName := make(map[string]lockfile.Skill, len(lf.Skills))
+	for _, skill := range lf.Skills {
+		lockByName[skill.Name] = skill
+	}
+
+	findings := make([]DoctorFinding, 0)
+	manifestNames := make(map[string]struct{}, len(doc.Skills))
+	for _, skill := range doc.Skills {
+		manifestNames[skill.Name] = struct{}{}
+
+		locked, ok := lockByName[skill.Name]
+		if !ok {
+			findings = append(findings, DoctorFinding{
+				Skill:   skill.Name,
+				Message: "missing lockfile entry",
+			})
+			continue
+		}
+
+		findings = append(findings, s.doctorSkillFindings(doc, skill, locked)...)
+	}
+
+	for _, skill := range lf.Skills {
+		if _, ok := manifestNames[skill.Name]; ok {
+			continue
+		}
+		findings = append(findings, DoctorFinding{
+			Skill:   skill.Name,
+			Message: "lockfile entry exists but skill is not declared in ski.toml",
+		})
+	}
+
+	return findings, nil
+}
+
+func (s Service) doctorSkillFindings(doc *manifest.Manifest, skill manifest.Skill, locked lockfile.Skill) []DoctorFinding {
+	findings := make([]DoctorFinding, 0)
+	expectedTargets := effectiveTargetsForSkill(doc, skill)
+	targetsToInspect := unionStrings(expectedTargets, locked.Targets)
+
+	if locked.Source != skill.Source {
+		findings = append(findings, DoctorFinding{
+			Skill:   skill.Name,
+			Message: fmt.Sprintf("lockfile source %q does not match manifest source %q", locked.Source, skill.Source),
+		})
+	}
+	if !sameStrings(expectedTargets, locked.Targets) {
+		findings = append(findings, DoctorFinding{
+			Skill:   skill.Name,
+			Message: fmt.Sprintf("lockfile targets %v do not match manifest targets %v", locked.Targets, expectedTargets),
+		})
+	}
+
+	storePath, err := lockedStorePath(s.HomeDir, locked)
+	if err != nil {
+		findings = append(findings, DoctorFinding{
+			Skill:   skill.Name,
+			Message: err.Error(),
+		})
+		return findings
+	}
+
+	info, err := os.Stat(storePath)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		findings = append(findings, DoctorFinding{
+			Skill:   skill.Name,
+			Message: fmt.Sprintf("store path %s is missing", storePath),
+		})
+	case err != nil:
+		findings = append(findings, DoctorFinding{
+			Skill:   skill.Name,
+			Message: fmt.Sprintf("stat %s: %v", storePath, err),
+		})
+	case !info.IsDir():
+		findings = append(findings, DoctorFinding{
+			Skill:   skill.Name,
+			Message: fmt.Sprintf("store path %s is not a directory", storePath),
+		})
+	default:
+		integrity, err := store.HashDir(storePath)
+		if err != nil {
+			findings = append(findings, DoctorFinding{
+				Skill:   skill.Name,
+				Message: fmt.Sprintf("hash %s: %v", storePath, err),
+			})
+		} else if integrity != locked.Integrity {
+			findings = append(findings, DoctorFinding{
+				Skill:   skill.Name,
+				Message: fmt.Sprintf("integrity mismatch: got %s, want %s", integrity, locked.Integrity),
+			})
+		}
+	}
+
+	for _, targetName := range targetsToInspect {
+		shouldExist := containsString(expectedTargets, targetName)
+		findings = append(findings, s.doctorTargetFindings(skill.Name, targetName, storePath, shouldExist)...)
+	}
+
+	return findings
+}
+
+func (s Service) doctorTargetFindings(skillName, targetName, storePath string, shouldExist bool) []DoctorFinding {
+	dir, err := target.SkillDir(s.ProjectDir, targetName)
+	if err != nil {
+		return []DoctorFinding{{
+			Skill:   skillName,
+			Message: err.Error(),
+		}}
+	}
+
+	linkPath := filepath.Join(dir, skillName)
+	info, err := os.Lstat(linkPath)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		if !shouldExist {
+			return nil
+		}
+		return []DoctorFinding{{
+			Skill:   skillName,
+			Message: fmt.Sprintf("missing %s symlink at %s", targetName, linkPath),
+		}}
+	case err != nil:
+		return []DoctorFinding{{
+			Skill:   skillName,
+			Message: fmt.Sprintf("lstat %s: %v", linkPath, err),
+		}}
+	case info.Mode()&os.ModeSymlink == 0:
+		if !shouldExist {
+			return []DoctorFinding{{
+				Skill:   skillName,
+				Message: fmt.Sprintf("unexpected %s entry at %s is not a symlink", targetName, linkPath),
+			}}
+		}
+		return []DoctorFinding{{
+			Skill:   skillName,
+			Message: fmt.Sprintf("%s is not a symlink", linkPath),
+		}}
+	}
+
+	current, err := os.Readlink(linkPath)
+	if err != nil {
+		return []DoctorFinding{{
+			Skill:   skillName,
+			Message: fmt.Sprintf("readlink %s: %v", linkPath, err),
+		}}
+	}
+	if !shouldExist {
+		return []DoctorFinding{{
+			Skill:   skillName,
+			Message: fmt.Sprintf("unexpected %s symlink at %s points to %s", targetName, linkPath, current),
+		}}
+	}
+	if current != storePath {
+		return []DoctorFinding{{
+			Skill:   skillName,
+			Message: fmt.Sprintf("%s symlink points to %s, want %s", targetName, current, storePath),
+		}}
+	}
+
+	return nil
+}
+
+func lockedStorePath(homeDir string, locked lockfile.Skill) (string, error) {
+	src, err := source.ParseGit(locked.Source)
+	if err != nil {
+		return "", fmt.Errorf("invalid lockfile source %q: %w", locked.Source, err)
+	}
+	storeKey, err := src.DeriveName()
+	if err != nil {
+		return "", fmt.Errorf("derive store key from %q: %w", locked.Source, err)
+	}
+	return filepath.Join(homeDir, ".ski", "store", "git", storeKey, locked.Commit), nil
+}
+
+func sameStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	counts := make(map[string]int, len(a))
+	for _, item := range a {
+		counts[item]++
+	}
+	for _, item := range b {
+		counts[item]--
+		if counts[item] < 0 {
+			return false
+		}
+	}
+	for _, count := range counts {
+		if count != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func containsString(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
 }
 
 func (s Service) CheckUpdates(name string) ([]UpdateInfo, error) {
