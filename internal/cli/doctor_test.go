@@ -59,6 +59,53 @@ func TestDoctorReportsHealthyProject(t *testing.T) {
 	}
 }
 
+func TestDoctorReportsHealthyGlobalScope(t *testing.T) {
+	t.Parallel()
+
+	repoPath, _ := createGitRepo(t, "repo-map", "repo-map")
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	globalManifestPath := manifest.GlobalPath(homeDir)
+	if err := os.MkdirAll(filepath.Dir(globalManifestPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := manifest.WriteFile(globalManifestPath, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills:  []manifest.Skill{},
+	}); err != nil {
+		t.Fatalf("WriteFile(manifest) error = %v", err)
+	}
+
+	addCmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	addCmd.SetArgs([]string{"add", "-g", "git:" + repoPath})
+	if err := addCmd.Execute(); err != nil {
+		t.Fatalf("add Execute() error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	doctorCmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &stdout,
+		Stderr:     &bytes.Buffer{},
+	})
+	doctorCmd.SetArgs([]string{"doctor", "-g"})
+	if err := doctorCmd.Execute(); err != nil {
+		t.Fatalf("doctor Execute() error = %v", err)
+	}
+
+	if got := stdout.String(); !strings.Contains(got, "doctor: ok") {
+		t.Fatalf("stdout = %q, want healthy doctor output", got)
+	}
+}
+
 func TestDoctorSupportsCustomTargetFolder(t *testing.T) {
 	t.Parallel()
 

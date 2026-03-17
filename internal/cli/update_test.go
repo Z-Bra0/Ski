@@ -73,6 +73,72 @@ func TestUpdateAdvancesLockfileAndSymlink(t *testing.T) {
 	}
 }
 
+func TestUpdateGlobalAdvancesHomeLockfileAndSymlink(t *testing.T) {
+	t.Parallel()
+
+	repoPath, oldCommit := createGitRepo(t, "repo-map", "repo-map")
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	globalManifestPath := manifest.GlobalPath(homeDir)
+	if err := os.MkdirAll(filepath.Dir(globalManifestPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := manifest.WriteFile(globalManifestPath, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills:  []manifest.Skill{},
+	}); err != nil {
+		t.Fatalf("WriteFile(manifest) error = %v", err)
+	}
+
+	addCmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	addCmd.SetArgs([]string{"add", "-g", "git:" + repoPath})
+	if err := addCmd.Execute(); err != nil {
+		t.Fatalf("add Execute() error = %v", err)
+	}
+
+	newCommit := advanceGitRepo(t, repoPath, "repo-map", "second")
+
+	var stdout bytes.Buffer
+	updateCmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &stdout,
+		Stderr:     &bytes.Buffer{},
+	})
+	updateCmd.SetArgs([]string{"update", "-g"})
+	if err := updateCmd.Execute(); err != nil {
+		t.Fatalf("update Execute() error = %v", err)
+	}
+
+	lf, err := lockfile.ReadFile(lockfile.GlobalPath(homeDir))
+	if err != nil {
+		t.Fatalf("ReadFile(lockfile) error = %v", err)
+	}
+	if got := lf.Skills[0].Commit; got != newCommit {
+		t.Fatalf("lockfile commit = %q, want %q", got, newCommit)
+	}
+
+	linkPath := filepath.Join(homeDir, ".claude", "skills", "repo-map")
+	targetPath, err := os.Readlink(linkPath)
+	if err != nil {
+		t.Fatalf("Readlink() error = %v", err)
+	}
+	wantStore := filepath.Join(homeDir, ".ski", "store", "git", "repo-map", newCommit)
+	if targetPath != wantStore {
+		t.Fatalf("symlink target = %q, want %q", targetPath, wantStore)
+	}
+	if !strings.Contains(stdout.String(), oldCommit[:7]) || !strings.Contains(stdout.String(), "updated 1 skills") {
+		t.Fatalf("stdout = %q, want update summary", stdout.String())
+	}
+}
+
 func TestUpdateCheckReportsWithoutMutating(t *testing.T) {
 	t.Parallel()
 
