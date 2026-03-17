@@ -18,6 +18,10 @@ func codexLink(projectRoot, name string) string {
 	return filepath.Join(projectRoot, ".codex", "skills", name)
 }
 
+func customLink(projectRoot, rel, name string) string {
+	return filepath.Join(projectRoot, rel, name)
+}
+
 // TestLinkCreatesSymlink verifies that Link creates the target directory and
 // a symlink pointing at storePath.
 func TestLinkCreatesSymlink(t *testing.T) {
@@ -31,6 +35,26 @@ func TestLinkCreatesSymlink(t *testing.T) {
 	}
 
 	got, err := os.Readlink(claudeLink(root, "my-skill"))
+	if err != nil {
+		t.Fatalf("Readlink() error = %v", err)
+	}
+	if got != store {
+		t.Fatalf("symlink target = %q, want %q", got, store)
+	}
+}
+
+func TestLinkSupportsCustomRelativeTarget(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := filepath.Join(t.TempDir(), "my-skill")
+	targetDir := "dir:./agent-skills/claude"
+
+	if err := target.Link(root, targetDir, "my-skill", store); err != nil {
+		t.Fatalf("Link() error = %v", err)
+	}
+
+	got, err := os.Readlink(customLink(root, filepath.Clean("./agent-skills/claude"), "my-skill"))
 	if err != nil {
 		t.Fatalf("Readlink() error = %v", err)
 	}
@@ -109,6 +133,56 @@ func TestLinkRejectsUnsupportedTarget(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unsupported target") {
 		t.Fatalf("Link() error = %v, want 'unsupported target'", err)
+	}
+}
+
+func TestLinkRejectsAbsoluteCustomTarget(t *testing.T) {
+	t.Parallel()
+
+	err := target.Link(t.TempDir(), "dir:/tmp/agent-skills", "my-skill", "/store")
+	if err == nil {
+		t.Fatal("Link() error = nil, want project-relative error")
+	}
+	if !strings.Contains(err.Error(), "project-relative") {
+		t.Fatalf("Link() error = %v, want project-relative error", err)
+	}
+}
+
+func TestLinkRejectsParentEscapingCustomTarget(t *testing.T) {
+	t.Parallel()
+
+	err := target.Link(t.TempDir(), "dir:../agent-skills", "my-skill", "/store")
+	if err == nil {
+		t.Fatal("Link() error = nil, want project-root error")
+	}
+	if !strings.Contains(err.Error(), "within the project root") {
+		t.Fatalf("Link() error = %v, want project-root error", err)
+	}
+}
+
+func TestLinkRejectsProjectRootCustomTarget(t *testing.T) {
+	t.Parallel()
+
+	for _, customTarget := range []string{"dir:.", "dir:./"} {
+		err := target.Link(t.TempDir(), customTarget, "my-skill", "/store")
+		if err == nil {
+			t.Fatalf("Link(%q) error = nil, want project-root error", customTarget)
+		}
+		if !strings.Contains(err.Error(), "subdirectory within the project root") {
+			t.Fatalf("Link(%q) error = %v, want subdirectory error", customTarget, err)
+		}
+	}
+}
+
+func TestLinkRejectsBareRelativePathWithoutPrefix(t *testing.T) {
+	t.Parallel()
+
+	err := target.Link(t.TempDir(), "./agent-skills/claude", "my-skill", "/store")
+	if err == nil {
+		t.Fatal("Link() error = nil, want unsupported target error")
+	}
+	if !strings.Contains(err.Error(), "unsupported target") {
+		t.Fatalf("Link() error = %v, want unsupported target error", err)
 	}
 }
 

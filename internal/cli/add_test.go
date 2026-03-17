@@ -198,6 +198,54 @@ func TestAddSupportsEscapedRepoPathContainingDoubleHash(t *testing.T) {
 	}
 }
 
+func TestAddLinksIntoCustomTargetFolder(t *testing.T) {
+	t.Parallel()
+
+	repoPath, commit := createGitRepo(t, "repo-map", "repo-map")
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+	customTarget := "dir:./agent-skills/claude"
+
+	path := filepath.Join(projectDir, manifest.FileName)
+	if err := manifest.WriteFile(path, manifest.Manifest{
+		Version: 1,
+		Targets: []string{customTarget},
+		Skills:  []manifest.Skill{},
+	}); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	cmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	cmd.SetArgs([]string{"add", "git:" + repoPath})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	lf, err := lockfile.ReadFile(filepath.Join(projectDir, lockfile.FileName))
+	if err != nil {
+		t.Fatalf("ReadFile(lockfile) error = %v", err)
+	}
+	if !reflect.DeepEqual(lf.Skills[0].Targets, []string{customTarget}) {
+		t.Fatalf("lockfile targets = %#v, want [%q]", lf.Skills[0].Targets, customTarget)
+	}
+
+	linkPath := filepath.Join(projectDir, filepath.Clean("./agent-skills/claude"), "repo-map")
+	targetPath, err := os.Readlink(linkPath)
+	if err != nil {
+		t.Fatalf("Readlink() error = %v", err)
+	}
+	wantStore := filepath.Join(homeDir, ".ski", "store", "git", "repo-map", commit)
+	if targetPath != wantStore {
+		t.Fatalf("symlink target = %q, want %q", targetPath, wantStore)
+	}
+}
+
 func TestAddFailsWithoutManifest(t *testing.T) {
 	t.Parallel()
 

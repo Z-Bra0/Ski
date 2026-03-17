@@ -33,6 +33,8 @@ If the repo URL or local path contains a literal `@`, `#`, or `\`, escape it in 
 
 `targets = ["claude"]` in `ski.toml` means project-local installation into `./.claude/skills/`. v1 does not write to `~/.claude/skills/` or other global agent directories.
 
+Custom project-local target folders are also supported with a `dir:` prefix. Example: `targets = ["claude", "dir:./agent-skills/claude"]`.
+
 ---
 
 ## Commands

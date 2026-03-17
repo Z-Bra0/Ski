@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 var dirs = map[string]string{
@@ -12,6 +13,8 @@ var dirs = map[string]string{
 	"cursor":   filepath.Join(".cursor", "skills"),
 	"openclaw": filepath.Join(".openclaw", "skills"),
 }
+
+const customDirPrefix = "dir:"
 
 func LinkAll(projectRoot string, targets []string, name, storePath string) error {
 	for _, target := range targets {
@@ -89,8 +92,38 @@ func Unlink(projectRoot, target, name string) error {
 
 func SkillDir(projectRoot, target string) (string, error) {
 	rel, ok := dirs[target]
-	if !ok {
-		return "", fmt.Errorf("unsupported target %q", target)
+	if ok {
+		return filepath.Join(projectRoot, rel), nil
+	}
+
+	rel, err := customSkillDir(target)
+	if err != nil {
+		return "", err
 	}
 	return filepath.Join(projectRoot, rel), nil
+}
+
+func customSkillDir(target string) (string, error) {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return "", fmt.Errorf("target is required")
+	}
+	if !strings.HasPrefix(target, customDirPrefix) {
+		return "", fmt.Errorf("unsupported target %q", target)
+	}
+	path := strings.TrimSpace(strings.TrimPrefix(target, customDirPrefix))
+	if path == "" {
+		return "", fmt.Errorf("custom target %q: missing directory path", target)
+	}
+	if filepath.IsAbs(path) {
+		return "", fmt.Errorf("custom target %q must be project-relative", target)
+	}
+
+	clean := filepath.Clean(path)
+	parentPrefix := ".." + string(filepath.Separator)
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, parentPrefix) {
+		return "", fmt.Errorf("custom target %q must resolve to a subdirectory within the project root", target)
+	}
+
+	return clean, nil
 }

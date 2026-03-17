@@ -59,6 +59,55 @@ func TestDoctorReportsHealthyProject(t *testing.T) {
 	}
 }
 
+func TestDoctorSupportsCustomTargetFolder(t *testing.T) {
+	t.Parallel()
+
+	repoPath, _ := createGitRepo(t, "repo-map", "repo-map")
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+	customTarget := "dir:./agent-skills/claude"
+
+	if err := manifest.WriteFile(filepath.Join(projectDir, manifest.FileName), manifest.Manifest{
+		Version: 1,
+		Targets: []string{customTarget},
+		Skills: []manifest.Skill{
+			{
+				Name:   "repo-map",
+				Source: "git:" + repoPath + "@v1.0.0",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("WriteFile(manifest) error = %v", err)
+	}
+
+	installCmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	installCmd.SetArgs([]string{"install"})
+	if err := installCmd.Execute(); err != nil {
+		t.Fatalf("install Execute() error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	doctorCmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &stdout,
+		Stderr:     &bytes.Buffer{},
+	})
+	doctorCmd.SetArgs([]string{"doctor"})
+	if err := doctorCmd.Execute(); err != nil {
+		t.Fatalf("doctor Execute() error = %v", err)
+	}
+
+	if got := stdout.String(); !strings.Contains(got, "doctor: ok") {
+		t.Fatalf("stdout = %q, want healthy doctor output", got)
+	}
+}
+
 func TestDoctorReportsIntegrityAndSymlinkProblems(t *testing.T) {
 	t.Parallel()
 

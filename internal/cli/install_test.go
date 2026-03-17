@@ -223,6 +223,57 @@ func TestInstallUsesPerSkillTargetOverrides(t *testing.T) {
 	}
 }
 
+func TestInstallSupportsCustomTargetFolder(t *testing.T) {
+	t.Parallel()
+
+	repoPath, commit := createGitRepo(t, "repo-map", "repo-map")
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+	customTarget := "dir:./agent-skills/claude"
+
+	if err := manifest.WriteFile(filepath.Join(projectDir, manifest.FileName), manifest.Manifest{
+		Version: 1,
+		Targets: []string{customTarget},
+		Skills: []manifest.Skill{
+			{
+				Name:   "repo-map",
+				Source: "git:" + repoPath + "@v1.0.0",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("WriteFile(manifest) error = %v", err)
+	}
+
+	installCmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	installCmd.SetArgs([]string{"install"})
+	if err := installCmd.Execute(); err != nil {
+		t.Fatalf("install Execute() error = %v", err)
+	}
+
+	linkPath := filepath.Join(projectDir, filepath.Clean("./agent-skills/claude"), "repo-map")
+	targetPath, err := os.Readlink(linkPath)
+	if err != nil {
+		t.Fatalf("Readlink() error = %v", err)
+	}
+	wantStore := filepath.Join(homeDir, ".ski", "store", "git", "repo-map", commit)
+	if targetPath != wantStore {
+		t.Fatalf("symlink target = %q, want %q", targetPath, wantStore)
+	}
+
+	lf, err := lockfile.ReadFile(filepath.Join(projectDir, lockfile.FileName))
+	if err != nil {
+		t.Fatalf("ReadFile(lockfile) error = %v", err)
+	}
+	if !reflect.DeepEqual(lf.Skills[0].Targets, []string{customTarget}) {
+		t.Fatalf("lockfile targets = %#v, want [%q]", lf.Skills[0].Targets, customTarget)
+	}
+}
+
 func TestInstallSupportsAliasName(t *testing.T) {
 	t.Parallel()
 

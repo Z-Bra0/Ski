@@ -248,6 +248,41 @@ func TestRemoveCleansStaleTargetsFromLockfile(t *testing.T) {
 	}
 }
 
+func TestRemoveDeletesCustomTargetSymlink(t *testing.T) {
+	t.Parallel()
+
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+	customTarget := "dir:./agent-skills/claude"
+	const (
+		skillName = "repo-map"
+		source    = "git:https://example.com/repo-map.git"
+		commit    = "abc1234abc1234abc1234abc1234abc1234abc123"
+	)
+
+	if err := manifest.WriteFile(filepath.Join(projectDir, manifest.FileName), manifest.Manifest{
+		Version: 1,
+		Targets: []string{customTarget},
+		Skills: []manifest.Skill{
+			{Name: skillName, Source: source},
+		},
+	}); err != nil {
+		t.Fatalf("WriteFile(manifest) error = %v", err)
+	}
+	writeFakeLockfile(t, projectDir, skillName, source, commit, []string{customTarget})
+
+	linkPath := filepath.Join(projectDir, filepath.Clean("./agent-skills/claude"), skillName)
+	makeSymlink(t, linkPath, fakeStorePath(homeDir, skillName, commit))
+
+	if err := removeCmd(t, projectDir, homeDir, skillName); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	if _, err := os.Lstat(linkPath); !os.IsNotExist(err) {
+		t.Fatalf("custom target symlink still exists after remove")
+	}
+}
+
 func TestRemoveFailsWithoutManifest(t *testing.T) {
 	t.Parallel()
 

@@ -76,7 +76,7 @@ For multi-skill repositories, the stored commit directory is the full repository
 
 ```toml
 version = 1
-targets = ["claude", "codex"]     # default targets for all skills
+targets = ["claude", "dir:./agent-skills/claude"]  # default targets for all skills
 
 [[skill]]
 name = "repo-map"
@@ -194,6 +194,10 @@ type TargetAdapter interface {
 ```
 
 Targets are project-scoped in v1. `targets = ["claude"]` means `./.claude/skills/` relative to the repo root that contains `ski.toml`, not `~/.claude/skills/`.
+
+Custom project-local target directories are also allowed via `dir:<relative-path>`, for example `dir:./agent-skills/claude` or `dir:.tools/skills`.
+
+Custom targets must resolve to a subdirectory within the project root. Absolute paths, `../` escapes, and paths that resolve to the project root itself such as `dir:.` are rejected in v1.
 
 Global installation is deferred to a later explicit mode such as `ski install --global`.
 
