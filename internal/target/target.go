@@ -186,12 +186,22 @@ func customSkillDir(baseDir string, global bool, target string) (string, error) 
 	if err != nil {
 		return "", fmt.Errorf("resolve custom target %q: %w", target, err)
 	}
+	if rel == "." {
+		return "", fmt.Errorf("custom target %q would install skills into the %s; use a subdirectory", target, scopeRootLabel(global))
+	}
 	parentPrefix := ".." + string(filepath.Separator)
-	if rel == "." || rel == ".." || strings.HasPrefix(rel, parentPrefix) {
-		return "", fmt.Errorf("target %q must resolve to a subdirectory within the project root", target)
+	if rel == ".." || strings.HasPrefix(rel, parentPrefix) {
+		return "", fmt.Errorf("target %q must resolve to a subdirectory within the %s", target, scopeRootLabel(global))
 	}
 
 	return resolveScopedDir(baseDir, clean, target)
+}
+
+func scopeRootLabel(global bool) string {
+	if global {
+		return "user home directory"
+	}
+	return "project root"
 }
 
 func resolveTargetDirs(baseDir string, global bool, targets []string) ([]string, error) {
@@ -236,7 +246,7 @@ func resolveScopedDir(baseDir, path, target string) (string, error) {
 		return "", fmt.Errorf("resolve custom target %q: %w", target, err)
 	}
 	if rel == "." {
-		return "", fmt.Errorf("custom target %q must resolve to a subdirectory within the project root", target)
+		return "", fmt.Errorf("custom target %q would install skills into the managed scope root; use a subdirectory", target)
 	}
 
 	parts := strings.Split(rel, string(filepath.Separator))

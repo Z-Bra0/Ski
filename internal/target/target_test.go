@@ -193,8 +193,22 @@ func TestLinkRejectsProjectRootCustomTarget(t *testing.T) {
 		if err == nil {
 			t.Fatalf("Link(%q) error = nil, want project-root error", customTarget)
 		}
-		if !strings.Contains(err.Error(), "subdirectory within the project root") {
-			t.Fatalf("Link(%q) error = %v, want subdirectory error", customTarget, err)
+		if !strings.Contains(err.Error(), "would install skills into the project root") {
+			t.Fatalf("Link(%q) error = %v, want explicit project-root error", customTarget, err)
+		}
+	}
+}
+
+func TestLinkGlobalRejectsHomeRootCustomTarget(t *testing.T) {
+	t.Parallel()
+
+	for _, customTarget := range []string{"dir:.", "dir:./"} {
+		err := target.LinkGlobal(t.TempDir(), customTarget, "my-skill", "/store")
+		if err == nil {
+			t.Fatalf("LinkGlobal(%q) error = nil, want home-root error", customTarget)
+		}
+		if !strings.Contains(err.Error(), "would install skills into the user home directory") {
+			t.Fatalf("LinkGlobal(%q) error = %v, want explicit home-root error", customTarget, err)
 		}
 	}
 }
