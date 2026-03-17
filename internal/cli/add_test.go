@@ -907,10 +907,18 @@ func TestAddMultiSkillRepoPromptsForSelectionOnTTY(t *testing.T) {
 	cmd := NewRootCmd(Options{
 		Getwd:      func() (string, error) { return projectDir, nil },
 		GetHomeDir: func() (string, error) { return homeDir, nil },
-		Stdin:      strings.NewReader("beta-skill\n"),
 		Stdout:     &stdout,
 		Stderr:     &bytes.Buffer{},
 		IsTTY:      func() bool { return true },
+		PromptMultiSelect: func(req MultiSelectRequest) ([]string, error) {
+			if req.Title != "Select skills to add" {
+				t.Fatalf("prompt title = %q, want skill selection title", req.Title)
+			}
+			if !reflect.DeepEqual(req.Options, []string{"alpha-skill", "beta-skill"}) {
+				t.Fatalf("prompt options = %#v, want discovered skills", req.Options)
+			}
+			return []string{"beta-skill"}, nil
+		},
 	})
 	cmd.SetArgs([]string{"add", "git:" + repoPath})
 
@@ -942,8 +950,8 @@ func TestAddMultiSkillRepoPromptsForSelectionOnTTY(t *testing.T) {
 	if targetPath != wantTarget {
 		t.Fatalf("symlink target = %q, want %q", targetPath, wantTarget)
 	}
-	if !strings.Contains(stdout.String(), "multiple skills found") {
-		t.Fatalf("stdout = %q, want prompt output", stdout.String())
+	if !strings.Contains(stdout.String(), "added beta-skill") {
+		t.Fatalf("stdout = %q, want add confirmation", stdout.String())
 	}
 }
 

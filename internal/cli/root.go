@@ -9,12 +9,13 @@ import (
 
 // Options controls filesystem, IO, and TTY dependencies for the CLI.
 type Options struct {
-	Getwd      func() (string, error)
-	GetHomeDir func() (string, error)
-	Stdin      io.Reader
-	Stdout     io.Writer
-	Stderr     io.Writer
-	IsTTY      func() bool
+	Getwd             func() (string, error)
+	GetHomeDir        func() (string, error)
+	Stdin             io.Reader
+	Stdout            io.Writer
+	Stderr            io.Writer
+	IsTTY             func() bool
+	PromptMultiSelect func(req MultiSelectRequest) ([]string, error)
 }
 
 // NewRootCmd constructs the ski CLI with all implemented subcommands.

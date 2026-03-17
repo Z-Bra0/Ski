@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"strings"
@@ -87,7 +86,7 @@ func resolveAddSelection(cmd *cobra.Command, opts Options, rawSource string, exp
 		return nil, fmt.Errorf("multiple skills found; rerun with %s %s or --all", strings.TrimSpace(rawSource), formatSkillFlags(discovered))
 	}
 
-	return promptForSkills(cmd, discovered)
+	return promptForSkills(cmd, opts, discovered)
 }
 
 func formatSkillFlags(skills []string) string {
@@ -98,65 +97,15 @@ func formatSkillFlags(skills []string) string {
 	return strings.Join(parts, " ")
 }
 
-func promptForSkills(cmd *cobra.Command, discovered []string) ([]string, error) {
-	reader := bufio.NewReader(cmd.InOrStdin())
-	out := cmd.OutOrStdout()
+func promptForSkills(cmd *cobra.Command, opts Options, discovered []string) ([]string, error) {
+	promptOpts := opts
+	promptOpts.Stdin = cmd.InOrStdin()
+	promptOpts.Stdout = cmd.OutOrStdout()
 
-	for {
-		fmt.Fprintln(out, "multiple skills found:")
-		for i, name := range discovered {
-			fmt.Fprintf(out, "  %d. %s\n", i+1, name)
-		}
-		fmt.Fprint(out, "select skill numbers or names (comma-separated), or 'all': ")
-
-		line, err := reader.ReadString('\n')
-		if err != nil && len(line) == 0 {
-			return nil, fmt.Errorf("read selection: %w", err)
-		}
-
-		selected, parseErr := parsePromptSelection(strings.TrimSpace(line), discovered)
-		if parseErr == nil {
-			return selected, nil
-		}
-		fmt.Fprintf(out, "invalid selection: %v\n", parseErr)
-	}
-}
-
-func parsePromptSelection(input string, discovered []string) ([]string, error) {
-	if input == "" {
-		return nil, fmt.Errorf("selection is required")
-	}
-	if strings.EqualFold(input, "all") {
-		return append([]string(nil), discovered...), nil
-	}
-
-	byIndex := make(map[string]string, len(discovered))
-	byName := make(map[string]string, len(discovered))
-	for i, name := range discovered {
-		byIndex[fmt.Sprintf("%d", i+1)] = name
-		byName[name] = name
-	}
-
-	seen := make(map[string]struct{}, len(discovered))
-	selected := make([]string, 0, len(discovered))
-	for _, part := range strings.Split(input, ",") {
-		token := strings.TrimSpace(part)
-		if token == "" {
-			return nil, fmt.Errorf("empty selection")
-		}
-		name, ok := byIndex[token]
-		if !ok {
-			name, ok = byName[token]
-		}
-		if !ok {
-			return nil, fmt.Errorf("unknown skill %q", token)
-		}
-		if _, ok := seen[name]; ok {
-			return nil, fmt.Errorf("duplicate selection %q", name)
-		}
-		seen[name] = struct{}{}
-		selected = append(selected, name)
-	}
-
-	return selected, nil
+	return runMultiSelectPrompt(promptOpts, MultiSelectRequest{
+		Title:       "Select skills to add",
+		Description: "Use arrows to move, space to toggle, and enter to confirm.",
+		Options:     discovered,
+		MinSelected: 1,
+	})
 }
