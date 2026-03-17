@@ -76,6 +76,66 @@ func TestAddSelectedRollsBackAfterLinkFailure(t *testing.T) {
 	}
 }
 
+func TestInstallRollsBackAfterLinkFailure(t *testing.T) {
+	t.Parallel()
+
+	repoPath := createMultiSkillRepo(t, "skill-pack", []multiSkillSpec{
+		{Path: filepath.Join("skills", "alpha-skill"), Name: "alpha-skill"},
+		{Path: filepath.Join("skills", "beta-skill"), Name: "beta-skill"},
+	})
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	manifestPath := filepath.Join(projectDir, manifest.FileName)
+	if err := manifest.WriteFile(manifestPath, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills: []manifest.Skill{
+			{Name: "alpha-skill", Source: "git:" + repoPath + "##alpha-skill"},
+			{Name: "beta-skill", Source: "git:" + repoPath + "##beta-skill"},
+		},
+	}); err != nil {
+		t.Fatalf("WriteFile(manifest) error = %v", err)
+	}
+
+	callCount := 0
+	svc := Service{
+		ProjectDir: projectDir,
+		HomeDir:    homeDir,
+		linkAllFn: func(targets []string, name, storePath string) error {
+			callCount++
+			if callCount == 2 {
+				return fmt.Errorf("forced install link failure for %s", name)
+			}
+			return target.LinkAll(projectDir, targets, name, storePath)
+		},
+		unlinkAllFn: func(targets []string, name string) error {
+			return target.UnlinkAll(projectDir, targets, name)
+		},
+	}
+
+	count, err := svc.Install()
+	if err == nil {
+		t.Fatal("Install() error = nil, want forced link failure")
+	}
+	if count != 0 {
+		t.Fatalf("Install() count = %d, want 0 after rollback", count)
+	}
+	if !strings.Contains(err.Error(), "forced install link failure for beta-skill") {
+		t.Fatalf("Install() error = %v, want forced install link failure", err)
+	}
+
+	if _, err := os.Lstat(filepath.Join(projectDir, ".claude", "skills", "alpha-skill")); !os.IsNotExist(err) {
+		t.Fatalf("alpha link stat error = %v, want not exist", err)
+	}
+	if _, err := os.Lstat(filepath.Join(projectDir, ".claude", "skills", "beta-skill")); !os.IsNotExist(err) {
+		t.Fatalf("beta link stat error = %v, want not exist", err)
+	}
+	if _, err := os.Stat(lockfile.Path(projectDir)); !os.IsNotExist(err) {
+		t.Fatalf("lockfile stat error = %v, want not exist", err)
+	}
+}
+
 type multiSkillSpec struct {
 	Path string
 	Name string

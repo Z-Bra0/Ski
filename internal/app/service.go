@@ -280,6 +280,10 @@ func restoreProjectFiles(manifestPath string, manifestData []byte, lockPath stri
 	if err := os.WriteFile(manifestPath, manifestData, 0o644); err != nil {
 		return fmt.Errorf("restore %s: %w", manifestPath, err)
 	}
+	return restoreLockfile(lockPath, lockData, hadLockfile)
+}
+
+func restoreLockfile(lockPath string, lockData []byte, hadLockfile bool) error {
 	if hadLockfile {
 		if err := os.WriteFile(lockPath, lockData, 0o644); err != nil {
 			return fmt.Errorf("restore %s: %w", lockPath, err)
