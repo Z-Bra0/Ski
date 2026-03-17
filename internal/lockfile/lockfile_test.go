@@ -152,12 +152,13 @@ func validLockfile() Lockfile {
 		Version: 1,
 		Skills: []Skill{
 			{
-				Name:      "repo-map",
-				Source:    "github:acme/repo-map@v1.0.0",
-				Version:   "0.3.1",
-				Commit:    "a1b2c3d4",
-				Integrity: "sha256:abcdef",
-				Targets:   []string{"codex"},
+				Name:          "repo-map",
+				Source:        "github:acme/repo-map@v1.0.0",
+				UpstreamSkill: "repo-map",
+				Version:       "0.3.1",
+				Commit:        "a1b2c3d4",
+				Integrity:     "sha256:abcdef",
+				Targets:       []string{"codex"},
 			},
 		},
 	}

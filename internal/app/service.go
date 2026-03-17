@@ -249,10 +249,11 @@ func cloneManifest(doc manifest.Manifest) manifest.Manifest {
 	}
 	for i, skill := range doc.Skills {
 		clone.Skills[i] = manifest.Skill{
-			Name:    skill.Name,
-			Source:  skill.Source,
-			Version: skill.Version,
-			Targets: append([]string(nil), skill.Targets...),
+			Name:          skill.Name,
+			Source:        skill.Source,
+			UpstreamSkill: skill.UpstreamSkill,
+			Version:       skill.Version,
+			Targets:       append([]string(nil), skill.Targets...),
 		}
 	}
 	return clone
@@ -265,12 +266,13 @@ func cloneLockfile(doc lockfile.Lockfile) lockfile.Lockfile {
 	}
 	for i, skill := range doc.Skills {
 		clone.Skills[i] = lockfile.Skill{
-			Name:      skill.Name,
-			Source:    skill.Source,
-			Version:   skill.Version,
-			Commit:    skill.Commit,
-			Integrity: skill.Integrity,
-			Targets:   append([]string(nil), skill.Targets...),
+			Name:          skill.Name,
+			Source:        skill.Source,
+			UpstreamSkill: skill.UpstreamSkill,
+			Version:       skill.Version,
+			Commit:        skill.Commit,
+			Integrity:     skill.Integrity,
+			Targets:       append([]string(nil), skill.Targets...),
 		}
 	}
 	return clone

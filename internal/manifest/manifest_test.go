@@ -14,14 +14,16 @@ func TestMarshalParseRoundTrip(t *testing.T) {
 		Targets: []string{"claude", "codex"},
 		Skills: []Skill{
 			{
-				Name:    "repo-map",
-				Source:  "github:acme/repo-map@v1.0.0",
-				Version: "0.3.1",
+				Name:          "repo-map",
+				Source:        "github:acme/repo-map@v1.0.0",
+				UpstreamSkill: "repo-map",
+				Version:       "0.3.1",
 			},
 			{
-				Name:    "audit-solidity",
-				Source:  "git:https://github.com/org/audit-solidity.git",
-				Targets: []string{"claude"},
+				Name:          "audit-solidity",
+				Source:        "git:https://github.com/org/audit-solidity.git",
+				UpstreamSkill: "audit-solidity",
+				Targets:       []string{"claude"},
 			},
 		},
 	}
@@ -73,6 +75,7 @@ targets = [
 [[skill]]
 name = 'repo "#1" map'
 source = 'git:https://example.com/repo#fragment.git'
+upstream_skill = 'repo-fragment'
 `)
 
 	doc, err := Parse(data)
@@ -85,8 +88,9 @@ source = 'git:https://example.com/repo#fragment.git'
 		Targets: []string{"codex"},
 		Skills: []Skill{
 			{
-				Name:   `repo "#1" map`,
-				Source: "git:https://example.com/repo#fragment.git",
+				Name:          `repo "#1" map`,
+				Source:        "git:https://example.com/repo#fragment.git",
+				UpstreamSkill: "repo-fragment",
 			},
 		},
 	}

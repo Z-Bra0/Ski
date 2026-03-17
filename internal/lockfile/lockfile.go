@@ -19,12 +19,13 @@ type Lockfile struct {
 }
 
 type Skill struct {
-	Name      string   `json:"name"`
-	Source    string   `json:"source"`
-	Version   string   `json:"version,omitempty"`
-	Commit    string   `json:"commit"`
-	Integrity string   `json:"integrity"`
-	Targets   []string `json:"targets,omitempty"`
+	Name          string   `json:"name"`
+	Source        string   `json:"source"`
+	UpstreamSkill string   `json:"upstream_skill,omitempty"`
+	Version       string   `json:"version,omitempty"`
+	Commit        string   `json:"commit"`
+	Integrity     string   `json:"integrity"`
+	Targets       []string `json:"targets,omitempty"`
 }
 
 func Default() Lockfile {

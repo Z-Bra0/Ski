@@ -22,10 +22,11 @@ type Manifest struct {
 }
 
 type Skill struct {
-	Name    string   `toml:"name"`
-	Source  string   `toml:"source"`
-	Version string   `toml:"version,omitempty"`
-	Targets []string `toml:"targets,omitempty"`
+	Name          string   `toml:"name"`
+	Source        string   `toml:"source"`
+	UpstreamSkill string   `toml:"upstream_skill,omitempty"`
+	Version       string   `toml:"version,omitempty"`
+	Targets       []string `toml:"targets,omitempty"`
 }
 
 func Default() Manifest {
