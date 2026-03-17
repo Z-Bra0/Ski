@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 
 	"ski/internal/lockfile"
 	"ski/internal/manifest"
@@ -299,7 +298,7 @@ func resolveUpdateCommit(projectDir string, src source.Git) (string, bool, error
 	if err == nil {
 		return commit, false, nil
 	}
-	if src.Ref != "" && source.IsCommitRef(src.Ref) && strings.Contains(err.Error(), "no matching revision found") {
+	if src.Ref != "" && source.IsCommitRef(src.Ref) && source.IsNoMatchingRevision(err) {
 		return "", true, nil
 	}
 	return "", false, err

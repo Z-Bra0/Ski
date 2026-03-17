@@ -1,6 +1,7 @@
 package source
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"os/exec"
@@ -15,6 +16,19 @@ const skillSelectorSeparator = "##"
 
 var commitRefPattern = regexp.MustCompile(`^[0-9a-fA-F]{7,40}$`)
 var skillSelectorPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+
+type NoMatchingRevisionError struct {
+	Ref string
+}
+
+func (e NoMatchingRevisionError) Error() string {
+	return fmt.Sprintf("resolve %q: no matching revision found", e.Ref)
+}
+
+func IsNoMatchingRevision(err error) bool {
+	var target NoMatchingRevisionError
+	return errors.As(err, &target)
+}
 
 type Git struct {
 	URL    string
@@ -189,7 +203,7 @@ func ResolveGit(dir string, spec Git) (string, error) {
 	if spec.Ref != "" {
 		refLabel = spec.Ref
 	}
-	return "", fmt.Errorf("resolve %q: no matching revision found", refLabel)
+	return "", NoMatchingRevisionError{Ref: refLabel}
 }
 
 func IsCommitRef(ref string) bool {

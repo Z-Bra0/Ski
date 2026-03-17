@@ -1,6 +1,10 @@
 package source
 
 import (
+	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -274,6 +278,63 @@ func TestIsCommitRef(t *testing.T) {
 				t.Fatalf("IsCommitRef(%q) = %v, want %v", tc.ref, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestResolveGitReturnsTypedNoMatchingRevisionError(t *testing.T) {
+	t.Parallel()
+
+	repoPath := createLocalGitRepo(t, "repo-map")
+
+	_, err := ResolveGit(repoPath, Git{
+		URL: repoPath,
+		Ref: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+	})
+	if err == nil {
+		t.Fatal("ResolveGit() error = nil, want missing revision error")
+	}
+
+	var typedErr NoMatchingRevisionError
+	if !IsNoMatchingRevision(err) || !strings.Contains(err.Error(), "no matching revision found") {
+		t.Fatalf("ResolveGit() error = %v, want typed no-matching-revision error", err)
+	}
+	if !strings.Contains(err.Error(), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef") {
+		t.Fatalf("ResolveGit() error = %v, want missing ref in message", err)
+	}
+	if !errors.As(err, &typedErr) {
+		t.Fatalf("ResolveGit() error = %T, want NoMatchingRevisionError", err)
+	}
+	if typedErr.Ref != "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" {
+		t.Fatalf("NoMatchingRevisionError.Ref = %q, want pinned ref", typedErr.Ref)
+	}
+}
+
+func createLocalGitRepo(t *testing.T, repoName string) string {
+	t.Helper()
+
+	root := t.TempDir()
+	repoPath := filepath.Join(root, repoName)
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoPath, "README.md"), []byte("# test\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(README.md) error = %v", err)
+	}
+
+	runGitSourceTest(t, root, "init", repoPath)
+	runGitSourceTest(t, repoPath, "add", ".")
+	runGitSourceTest(t, repoPath, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "initial")
+	return repoPath
+}
+
+func runGitSourceTest(t *testing.T, dir string, args ...string) {
+	t.Helper()
+
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v error = %v\n%s", args, err, string(output))
 	}
 }
 
