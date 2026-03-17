@@ -189,7 +189,14 @@ If the source omits `##...` and the repository contains multiple skills:
 
 `ski add --all` adds every discovered skill in the repository.
 
-`ski add` writes canonical per-skill sources to the active manifest, for example `git:<url>##repo-map`, fetches into `~/.ski/store/`, links to the active-scope targets, and writes the active lockfile. Same as `npm install <pkg>`.
+`ski add` writes the canonical repository source plus `upstream_skill` to the active manifest and lockfile, for example:
+
+```toml
+source = "git:https://github.com/org/skill-pack.git"
+upstream_skill = "repo-map"
+```
+
+Older manifests and lockfiles may still encode the selected upstream skill in `source` using the legacy `##skill-name` form; both formats are read during migration. `ski add` fetches into `~/.ski/store/`, links to the active-scope targets, and writes the active lockfile. Same as `npm install <pkg>`.
 
 ### `ski install`
 
@@ -199,7 +206,7 @@ If the active lockfile does not exist yet, `ski install` resolves the manifest e
 
 ### `ski list`
 
-Lists the skills declared in the active scope, including source, locked commit, and effective targets.
+Lists the skills declared in the active scope, including canonical source, upstream skill, locked commit, and effective targets.
 
 ### `ski doctor`
 

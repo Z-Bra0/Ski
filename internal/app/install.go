@@ -45,7 +45,7 @@ func (s Service) Install() (int, error) {
 	nextLock := cloneLockfile(*lf)
 	plans := make([]plannedInstall, 0, len(doc.Skills))
 	for _, mSkill := range doc.Skills {
-		src, err := s.loadSourceForScope(mSkill.Source)
+		src, err := s.loadSkillSourceForScope(mSkill.Source, mSkill.UpstreamSkill)
 		if err != nil {
 			return 0, fmt.Errorf("skill %q: %w", mSkill.Name, err)
 		}
@@ -73,10 +73,13 @@ func (s Service) Install() (int, error) {
 
 		lockEntry := lockfile.Skill{
 			Name:      mSkill.Name,
-			Source:    mSkill.Source,
 			Commit:    stored.Commit,
 			Integrity: stored.Integrity,
 			Targets:   effectiveTargets,
+		}
+		lockEntry.Source, lockEntry.UpstreamSkill, err = canonicalSkillIdentity(mSkill.Source, mSkill.UpstreamSkill)
+		if err != nil {
+			return 0, fmt.Errorf("skill %q: %w", mSkill.Name, err)
 		}
 		upsertLockSkill(&nextLock, lockEntry)
 		plans = append(plans, plannedInstall{

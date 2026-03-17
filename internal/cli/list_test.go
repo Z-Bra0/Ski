@@ -53,11 +53,14 @@ func TestListGlobalShowsHomeScopedSkills(t *testing.T) {
 	}
 
 	out := stdout.String()
-	if !strings.Contains(out, "NAME") || !strings.Contains(out, "SOURCE") || !strings.Contains(out, "COMMIT") || !strings.Contains(out, "TARGETS") {
+	if !strings.Contains(out, "NAME") || !strings.Contains(out, "SOURCE") || !strings.Contains(out, "UPSTREAM") || !strings.Contains(out, "COMMIT") || !strings.Contains(out, "TARGETS") {
 		t.Fatalf("stdout = %q, want table header", out)
 	}
 	if !strings.Contains(out, "repo-map") {
 		t.Fatalf("stdout = %q, want repo-map row", out)
+	}
+	if !strings.Contains(out, "git:"+repoPath+"@v1.0.0") {
+		t.Fatalf("stdout = %q, want canonical source", out)
 	}
 	if !strings.Contains(out, commit[:7]) {
 		t.Fatalf("stdout = %q, want commit %q", out, commit[:7])

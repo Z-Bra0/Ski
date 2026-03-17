@@ -44,7 +44,7 @@ func (s Service) CheckUpdates(name string) ([]UpdateInfo, error) {
 
 	updates := make([]UpdateInfo, 0, len(selected))
 	for _, mSkill := range selected {
-		src, err := s.loadSourceForScope(mSkill.Source)
+		src, err := s.loadSkillSourceForScope(mSkill.Source, mSkill.UpstreamSkill)
 		if err != nil {
 			return nil, fmt.Errorf("skill %q: %w", mSkill.Name, err)
 		}
@@ -96,7 +96,7 @@ func (s Service) Update(name string) ([]UpdateInfo, error) {
 	updates := make([]UpdateInfo, 0, len(selected))
 	plans := make([]plannedUpdate, 0, len(selected))
 	for _, mSkill := range selected {
-		src, err := s.loadSourceForScope(mSkill.Source)
+		src, err := s.loadSkillSourceForScope(mSkill.Source, mSkill.UpstreamSkill)
 		if err != nil {
 			return nil, fmt.Errorf("skill %q: %w", mSkill.Name, err)
 		}
@@ -125,13 +125,17 @@ func (s Service) Update(name string) ([]UpdateInfo, error) {
 			return nil, fmt.Errorf("skill %q: %w", mSkill.Name, err)
 		}
 
-		upsertLockSkill(&nextLock, lockfile.Skill{
+		lockEntry := lockfile.Skill{
 			Name:      mSkill.Name,
-			Source:    mSkill.Source,
 			Commit:    stored.Commit,
 			Integrity: stored.Integrity,
 			Targets:   targets,
-		})
+		}
+		lockEntry.Source, lockEntry.UpstreamSkill, err = canonicalSkillIdentity(mSkill.Source, mSkill.UpstreamSkill)
+		if err != nil {
+			return nil, fmt.Errorf("skill %q: %w", mSkill.Name, err)
+		}
+		upsertLockSkill(&nextLock, lockEntry)
 		plans = append(plans, plannedUpdate{
 			Name:    mSkill.Name,
 			Changes: changes,

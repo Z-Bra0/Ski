@@ -52,8 +52,9 @@ func TestAddFetchesWritesLockfileAndLinksTargets(t *testing.T) {
 		Targets: []string{"claude"},
 		Skills: []manifest.Skill{
 			{
-				Name:   "repo-map",
-				Source: "git:" + repoPath + "@v1.0.0##repo-map",
+				Name:          "repo-map",
+				Source:        "git:" + repoPath + "@v1.0.0",
+				UpstreamSkill: "repo-map",
 			},
 		},
 	}
@@ -70,7 +71,7 @@ func TestAddFetchesWritesLockfileAndLinksTargets(t *testing.T) {
 		t.Fatalf("lockfile skills = %#v, want one entry", lf.Skills)
 	}
 	gotLock := lf.Skills[0]
-	if gotLock.Name != "repo-map" || gotLock.Source != "git:"+repoPath+"@v1.0.0##repo-map" || gotLock.Commit != commit {
+	if gotLock.Name != "repo-map" || gotLock.Source != "git:"+repoPath+"@v1.0.0" || gotLock.UpstreamSkill != "repo-map" || gotLock.Commit != commit {
 		t.Fatalf("lock skill = %#v, want matching name/source/commit", gotLock)
 	}
 	if gotLock.Integrity == "" || !strings.HasPrefix(gotLock.Integrity, "sha256:") {
@@ -134,7 +135,7 @@ func TestAddSupportsNameOverride(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile() error = %v", err)
 	}
-	if len(doc.Skills) != 1 || doc.Skills[0].Name != "custom-name" || doc.Skills[0].Source != "git:"+repoPath+"##repo-map" {
+	if len(doc.Skills) != 1 || doc.Skills[0].Name != "custom-name" || doc.Skills[0].Source != "git:"+repoPath || doc.Skills[0].UpstreamSkill != "repo-map" {
 		t.Fatalf("skills = %#v, want custom-name", doc.Skills)
 	}
 
@@ -142,7 +143,7 @@ func TestAddSupportsNameOverride(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile(lockfile) error = %v", err)
 	}
-	if len(lf.Skills) != 1 || lf.Skills[0].Name != "custom-name" || lf.Skills[0].Source != "git:"+repoPath+"##repo-map" {
+	if len(lf.Skills) != 1 || lf.Skills[0].Name != "custom-name" || lf.Skills[0].Source != "git:"+repoPath || lf.Skills[0].UpstreamSkill != "repo-map" {
 		t.Fatalf("lockfile skills = %#v, want custom-name", lf.Skills)
 	}
 	if !reflect.DeepEqual(lf.Skills[0].Targets, []string{"claude"}) {
@@ -192,9 +193,9 @@ func TestAddSupportsEscapedRepoPathContainingDoubleHash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile() error = %v", err)
 	}
-	wantSource := source.Git{URL: repoPath, Skills: []string{"repo-map"}}.String()
-	if len(doc.Skills) != 1 || doc.Skills[0].Source != wantSource {
-		t.Fatalf("skills = %#v, want source %q", doc.Skills, wantSource)
+	wantSource := source.Git{URL: repoPath}.String()
+	if len(doc.Skills) != 1 || doc.Skills[0].Source != wantSource || doc.Skills[0].UpstreamSkill != "repo-map" {
+		t.Fatalf("skills = %#v, want source %q with upstream skill repo-map", doc.Skills, wantSource)
 	}
 }
 
@@ -231,9 +232,9 @@ func TestAddSupportsBareRemoteFileURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile() error = %v", err)
 	}
-	wantSource := source.Git{URL: fileURL, Skills: []string{"repo-map"}}.String()
-	if len(doc.Skills) != 1 || doc.Skills[0].Source != wantSource {
-		t.Fatalf("skills = %#v, want source %q", doc.Skills, wantSource)
+	wantSource := source.Git{URL: fileURL}.String()
+	if len(doc.Skills) != 1 || doc.Skills[0].Source != wantSource || doc.Skills[0].UpstreamSkill != "repo-map" {
+		t.Fatalf("skills = %#v, want source %q with upstream skill repo-map", doc.Skills, wantSource)
 	}
 }
 
@@ -382,9 +383,9 @@ func TestAddGlobalCanonicalizesRelativeLocalSource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile(manifest) error = %v", err)
 	}
-	wantSource := source.Git{URL: repoPath, Skills: []string{"repo-map"}}.String()
-	if len(doc.Skills) != 1 || doc.Skills[0].Source != wantSource {
-		t.Fatalf("skills = %#v, want source %q", doc.Skills, wantSource)
+	wantSource := source.Git{URL: repoPath}.String()
+	if len(doc.Skills) != 1 || doc.Skills[0].Source != wantSource || doc.Skills[0].UpstreamSkill != "repo-map" {
+		t.Fatalf("skills = %#v, want source %q with upstream skill repo-map", doc.Skills, wantSource)
 	}
 }
 
@@ -449,8 +450,9 @@ func TestAddRejectsDuplicateDerivedName(t *testing.T) {
 		Targets: []string{},
 		Skills: []manifest.Skill{
 			{
-				Name:   "repo-map",
-				Source: "git:/tmp/original-repo-map##repo-map",
+				Name:          "repo-map",
+				Source:        "git:/tmp/original-repo-map",
+				UpstreamSkill: "repo-map",
 			},
 		},
 	}
@@ -487,8 +489,9 @@ func TestAddRejectsDuplicateSource(t *testing.T) {
 		Targets: []string{},
 		Skills: []manifest.Skill{
 			{
-				Name:   "existing-skill",
-				Source: "git:" + repoPath + "@v1.0.0##repo-map",
+				Name:          "existing-skill",
+				Source:        "git:" + repoPath + "@v1.0.0",
+				UpstreamSkill: "repo-map",
 			},
 		},
 	}
@@ -593,8 +596,8 @@ func TestAddMultiSkillRepoWithExplicitSelectors(t *testing.T) {
 		Version: 1,
 		Targets: []string{"claude"},
 		Skills: []manifest.Skill{
-			{Name: "alpha-skill", Source: "git:" + repoPath + "##alpha-skill"},
-			{Name: "beta-skill", Source: "git:" + repoPath + "##beta-skill"},
+			{Name: "alpha-skill", Source: "git:" + repoPath, UpstreamSkill: "alpha-skill"},
+			{Name: "beta-skill", Source: "git:" + repoPath, UpstreamSkill: "beta-skill"},
 		},
 	}
 	if !reflect.DeepEqual(*doc, wantManifest) {
@@ -846,7 +849,7 @@ func TestAddMultiSkillRepoPromptsForSelectionOnTTY(t *testing.T) {
 		Version: 1,
 		Targets: []string{"claude"},
 		Skills: []manifest.Skill{
-			{Name: "beta-skill", Source: "git:" + repoPath + "##beta-skill"},
+			{Name: "beta-skill", Source: "git:" + repoPath, UpstreamSkill: "beta-skill"},
 		},
 	}
 	if !reflect.DeepEqual(*doc, want) {

@@ -72,10 +72,33 @@ func (s Service) doctorSkillFindings(doc *manifest.Manifest, skill manifest.Skil
 	expectedTargets := effectiveTargetsForSkill(doc, skill)
 	targetsToInspect := unionStrings(expectedTargets, locked.Targets)
 
-	if locked.Source != skill.Source {
+	manifestSource, manifestUpstream, err := canonicalSkillIdentity(skill.Source, skill.UpstreamSkill)
+	if err != nil {
+		findings = append(findings, DoctorFinding{
+			Skill:   skill.Name,
+			Message: err.Error(),
+		})
+		return findings
+	}
+	lockSource, lockUpstream, err := canonicalSkillIdentity(locked.Source, locked.UpstreamSkill)
+	if err != nil {
+		findings = append(findings, DoctorFinding{
+			Skill:   skill.Name,
+			Message: err.Error(),
+		})
+		return findings
+	}
+
+	if lockSource != manifestSource {
 		findings = append(findings, DoctorFinding{
 			Skill:   skill.Name,
 			Message: fmt.Sprintf("lockfile source %q does not match manifest source %q", locked.Source, skill.Source),
+		})
+	}
+	if lockUpstream != manifestUpstream {
+		findings = append(findings, DoctorFinding{
+			Skill:   skill.Name,
+			Message: fmt.Sprintf("lockfile upstream skill %q does not match manifest upstream skill %q", locked.UpstreamSkill, skill.UpstreamSkill),
 		})
 	}
 	if !sameStrings(expectedTargets, locked.Targets) {
@@ -85,7 +108,7 @@ func (s Service) doctorSkillFindings(doc *manifest.Manifest, skill manifest.Skil
 		})
 	}
 
-	src, err := s.loadSourceForScope(locked.Source)
+	src, err := s.loadSkillSourceForScope(locked.Source, locked.UpstreamSkill)
 	if err != nil {
 		findings = append(findings, DoctorFinding{
 			Skill:   skill.Name,

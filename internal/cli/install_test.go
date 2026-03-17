@@ -383,8 +383,9 @@ func TestInstallSupportsAliasName(t *testing.T) {
 		Targets: []string{"claude"},
 		Skills: []manifest.Skill{
 			{
-				Name:   "custom-name",
-				Source: "git:" + repoPath + "@v1.0.0##repo-map",
+				Name:          "custom-name",
+				Source:        "git:" + repoPath + "@v1.0.0",
+				UpstreamSkill: "repo-map",
 			},
 		},
 	}); err != nil {
@@ -416,7 +417,7 @@ func TestInstallSupportsAliasName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile(lockfile) error = %v", err)
 	}
-	if len(lf.Skills) != 1 || lf.Skills[0].Name != "custom-name" || lf.Skills[0].Source != "git:"+repoPath+"@v1.0.0##repo-map" {
+	if len(lf.Skills) != 1 || lf.Skills[0].Name != "custom-name" || lf.Skills[0].Source != "git:"+repoPath+"@v1.0.0" || lf.Skills[0].UpstreamSkill != "repo-map" {
 		t.Fatalf("lockfile skills = %#v, want aliased entry", lf.Skills)
 	}
 }
@@ -435,8 +436,8 @@ func TestInstallRestoresMultiSkillSelectors(t *testing.T) {
 		Version: 1,
 		Targets: []string{"claude"},
 		Skills: []manifest.Skill{
-			{Name: "alpha-skill", Source: "git:" + repoPath + "##alpha-skill"},
-			{Name: "beta-skill", Source: "git:" + repoPath + "##beta-skill"},
+			{Name: "alpha-skill", Source: "git:" + repoPath, UpstreamSkill: "alpha-skill"},
+			{Name: "beta-skill", Source: "git:" + repoPath, UpstreamSkill: "beta-skill"},
 		},
 	}); err != nil {
 		t.Fatalf("WriteFile(manifest) error = %v", err)

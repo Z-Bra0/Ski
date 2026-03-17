@@ -12,12 +12,13 @@ import (
 )
 
 type plannedAdd struct {
-	Name      string
-	Source    string
-	Targets   []string
-	StorePath string
-	Lock      lockfile.Skill
-	Manifest  manifest.Skill
+	Name          string
+	Source        string
+	UpstreamSkill string
+	Targets       []string
+	StorePath     string
+	Lock          lockfile.Skill
+	Manifest      manifest.Skill
 }
 
 // Add parses a git source, fetches it into the store, links to targets,
@@ -85,13 +86,15 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 		if nameOverride != "" {
 			localName = nameOverride
 		}
-		canonical := baseSource.WithSkills([]string{selectedSkillName}).String()
+		canonical := baseSource.String()
 
 		if existing, ok := findSkill(nextDoc.Skills, func(skill manifest.Skill) bool { return skill.Name == localName }); ok {
 			return nil, fmt.Errorf("skill name %q already exists for source %q", localName, existing.Source)
 		}
-		if existing, ok := findSkill(nextDoc.Skills, func(skill manifest.Skill) bool { return skill.Source == canonical }); ok {
-			return nil, fmt.Errorf("source %q already exists as skill %q", canonical, existing.Name)
+		if existing, ok, err := findSkillByIdentity(nextDoc.Skills, canonical, selectedSkillName); err != nil {
+			return nil, err
+		} else if ok {
+			return nil, fmt.Errorf("source %q with upstream skill %q already exists as skill %q", canonical, selectedSkillName, existing.Name)
 		}
 
 		stored, err := store.EnsureGit(s.sourceResolveDir(), s.HomeDir, baseSource.WithSkills([]string{selectedSkillName}), selectedSkillName)
@@ -104,26 +107,29 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 		}
 
 		lockEntry := lockfile.Skill{
-			Name:      localName,
-			Source:    canonical,
-			Commit:    stored.Commit,
-			Integrity: stored.Integrity,
-			Targets:   effectiveTargets,
+			Name:          localName,
+			Source:        canonical,
+			UpstreamSkill: selectedSkillName,
+			Commit:        stored.Commit,
+			Integrity:     stored.Integrity,
+			Targets:       effectiveTargets,
 		}
 		manifestEntry := manifest.Skill{
-			Name:   localName,
-			Source: canonical,
+			Name:          localName,
+			Source:        canonical,
+			UpstreamSkill: selectedSkillName,
 		}
 		upsertLockSkill(&nextLock, lockEntry)
 		nextDoc.Skills = append(nextDoc.Skills, manifestEntry)
 
 		planned = append(planned, plannedAdd{
-			Name:      localName,
-			Source:    canonical,
-			Targets:   append([]string(nil), effectiveTargets...),
-			StorePath: stored.Path,
-			Lock:      lockEntry,
-			Manifest:  manifestEntry,
+			Name:          localName,
+			Source:        canonical,
+			UpstreamSkill: selectedSkillName,
+			Targets:       append([]string(nil), effectiveTargets...),
+			StorePath:     stored.Path,
+			Lock:          lockEntry,
+			Manifest:      manifestEntry,
 		})
 		added = append(added, localName)
 	}
@@ -158,6 +164,19 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 	}
 
 	return added, nil
+}
+
+func findSkillByIdentity(skills []manifest.Skill, sourceValue, upstreamSkill string) (manifest.Skill, bool, error) {
+	for _, skill := range skills {
+		same, err := sameSkillIdentity(skill.Source, skill.UpstreamSkill, sourceValue, upstreamSkill)
+		if err != nil {
+			return manifest.Skill{}, false, fmt.Errorf("skill %q: %w", skill.Name, err)
+		}
+		if same {
+			return skill, true, nil
+		}
+	}
+	return manifest.Skill{}, false, nil
 }
 
 func (s Service) preflightAddLinks(targets []string, name string) error {
