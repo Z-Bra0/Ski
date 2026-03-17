@@ -17,25 +17,30 @@ const skillSelectorSeparator = "##"
 var commitRefPattern = regexp.MustCompile(`^[0-9a-fA-F]{7,40}$`)
 var skillSelectorPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
+// NoMatchingRevisionError reports that a requested git ref resolved to no revision.
 type NoMatchingRevisionError struct {
 	Ref string
 }
 
+// Error implements the error interface.
 func (e NoMatchingRevisionError) Error() string {
 	return fmt.Sprintf("resolve %q: no matching revision found", e.Ref)
 }
 
+// IsNoMatchingRevision reports whether err is a NoMatchingRevisionError.
 func IsNoMatchingRevision(err error) bool {
 	var target NoMatchingRevisionError
 	return errors.As(err, &target)
 }
 
+// Git identifies a git repository plus an optional ref and upstream skill selectors.
 type Git struct {
 	URL    string
 	Ref    string
 	Skills []string
 }
 
+// ParseGit parses a canonical git: source or a bare remote git URL.
 func ParseGit(raw string) (Git, error) {
 	raw = strings.TrimSpace(raw)
 	spec, ok := normalizeGitInput(raw)
@@ -93,6 +98,7 @@ func isBareRemoteGitURL(raw string) bool {
 	return false
 }
 
+// String returns the canonical git: representation for the source.
 func (g Git) String() string {
 	var b strings.Builder
 	b.WriteString(gitPrefix)
@@ -114,6 +120,7 @@ func (g Git) String() string {
 	return b.String()
 }
 
+// DeriveName returns the repository-derived store key for the source.
 func (g Git) DeriveName() (string, error) {
 	p := strings.TrimSuffix(g.pathForName(), "/")
 	if p == "" {
@@ -164,6 +171,7 @@ func (g Git) pathForName() string {
 	return g.URL
 }
 
+// IsRemote reports whether the source URL refers to a remote git endpoint.
 func (g Git) IsRemote() bool {
 	if strings.Contains(g.URL, "://") {
 		return true
@@ -174,10 +182,12 @@ func (g Git) IsRemote() bool {
 	return false
 }
 
+// IsLocalPath reports whether the source URL should be resolved as a local path.
 func (g Git) IsLocalPath() bool {
 	return !g.IsRemote()
 }
 
+// ResolveGit resolves the source ref to a concrete commit SHA.
 func ResolveGit(dir string, spec Git) (string, error) {
 	patterns := []string{"HEAD"}
 	if spec.Ref != "" {
@@ -206,15 +216,18 @@ func ResolveGit(dir string, spec Git) (string, error) {
 	return "", NoMatchingRevisionError{Ref: refLabel}
 }
 
+// IsCommitRef reports whether ref looks like a raw commit SHA.
 func IsCommitRef(ref string) bool {
 	return commitRefPattern.MatchString(ref)
 }
 
+// WithSkills returns a copy of g with normalized upstream skill selectors.
 func (g Git) WithSkills(skills []string) Git {
 	g.Skills = normalizeSkillSelectors(skills)
 	return g
 }
 
+// WithoutSkills returns a copy of g with any upstream skill selectors removed.
 func (g Git) WithoutSkills() Git {
 	g.Skills = nil
 	return g

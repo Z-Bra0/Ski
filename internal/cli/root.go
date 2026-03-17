@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// Options controls filesystem, IO, and TTY dependencies for the CLI.
 type Options struct {
 	Getwd      func() (string, error)
 	GetHomeDir func() (string, error)
@@ -16,6 +17,7 @@ type Options struct {
 	IsTTY      func() bool
 }
 
+// NewRootCmd constructs the ski CLI with all implemented subcommands.
 func NewRootCmd(opts Options) *cobra.Command {
 	if opts.Getwd == nil {
 		opts.Getwd = os.Getwd

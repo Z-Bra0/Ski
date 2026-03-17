@@ -15,12 +15,14 @@ const (
 	CurrentVersion = 1
 )
 
+// Manifest is the active-scope TOML configuration stored in ski.toml.
 type Manifest struct {
 	Version int      `toml:"version"`
 	Targets []string `toml:"targets"`
 	Skills  []Skill  `toml:"skill,omitempty"`
 }
 
+// Skill describes one declared skill entry inside a Manifest.
 type Skill struct {
 	Name          string   `toml:"name"`
 	Source        string   `toml:"source"`
@@ -29,6 +31,7 @@ type Skill struct {
 	Targets       []string `toml:"targets,omitempty"`
 }
 
+// Default returns an empty manifest using the current schema version.
 func Default() Manifest {
 	return Manifest{
 		Version: CurrentVersion,
@@ -37,6 +40,7 @@ func Default() Manifest {
 	}
 }
 
+// ReadFile reads, parses, and validates a manifest from disk.
 func ReadFile(path string) (*Manifest, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -45,6 +49,7 @@ func ReadFile(path string) (*Manifest, error) {
 	return Parse(data)
 }
 
+// WriteFile validates and writes a manifest to disk.
 func WriteFile(path string, doc Manifest) error {
 	data, err := Marshal(doc)
 	if err != nil {
@@ -53,6 +58,7 @@ func WriteFile(path string, doc Manifest) error {
 	return os.WriteFile(path, data, 0o644)
 }
 
+// Parse decodes TOML data into a validated Manifest.
 func Parse(data []byte) (*Manifest, error) {
 	doc := Default()
 
@@ -69,6 +75,7 @@ func Parse(data []byte) (*Manifest, error) {
 	return &doc, nil
 }
 
+// Marshal validates and encodes a Manifest as TOML.
 func Marshal(doc Manifest) ([]byte, error) {
 	normalize(&doc)
 	if err := doc.Validate(); err != nil {
@@ -82,6 +89,7 @@ func Marshal(doc Manifest) ([]byte, error) {
 	return data, nil
 }
 
+// Validate checks schema version and required skill fields.
 func (doc Manifest) Validate() error {
 	if doc.Version != CurrentVersion {
 		return fmt.Errorf("unsupported manifest version %d", doc.Version)
@@ -104,10 +112,12 @@ func (doc Manifest) Validate() error {
 	return nil
 }
 
+// Path returns the project-local manifest path rooted at dir.
 func Path(dir string) string {
 	return filepath.Join(dir, FileName)
 }
 
+// GlobalPath returns the global manifest path rooted at homeDir.
 func GlobalPath(homeDir string) string {
 	return filepath.Join(homeDir, ".ski", GlobalFileName)
 }

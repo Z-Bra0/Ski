@@ -44,6 +44,8 @@ ski doctor                       # verify links and lock state
 ski install                      # restore from ski.toml + ski.lock.json
 ```
 
+Use `ski` only with skill repositories you have verified and trust. Before `ski add`, `ski install`, or `ski update`, review the upstream repo and `SKILL.md`, and re-check the diff before upgrading to a newer ref or commit.
+
 If a repo contains multiple skills, `ski add` prompts in a terminal. In non-interactive mode, use `ski add <source> --skill skill-a --skill skill-b` or `ski add <source> --all`. Legacy `##skill-a,skill-b` source selectors are still accepted during migration.
 
 If the repo URL or local path contains a literal `@`, `#`, or `\`, escape it in the source string as `\@`, `\#`, or `\\`. Example: `git:/tmp/skill\#\#pack`.

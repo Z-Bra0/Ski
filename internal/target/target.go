@@ -17,10 +17,12 @@ var dirs = map[string]string{
 
 const customDirPrefix = "dir:"
 
+// LinkAll links a skill into every target directory in project scope.
 func LinkAll(projectRoot string, targets []string, name, storePath string) error {
 	return linkAll(projectRoot, false, targets, name, storePath)
 }
 
+// LinkAllGlobal links a skill into every target directory in global scope.
 func LinkAllGlobal(homeDir string, targets []string, name, storePath string) error {
 	return linkAll(homeDir, true, targets, name, storePath)
 }
@@ -38,6 +40,7 @@ func linkAll(baseDir string, global bool, targets []string, name, storePath stri
 	return nil
 }
 
+// Link links a skill into one project-scoped target directory.
 func Link(projectRoot, target, name, storePath string) error {
 	dir, err := SkillDir(projectRoot, target)
 	if err != nil {
@@ -46,6 +49,7 @@ func Link(projectRoot, target, name, storePath string) error {
 	return linkDir(dir, name, storePath)
 }
 
+// LinkGlobal links a skill into one global-scoped target directory.
 func LinkGlobal(homeDir, target, name, storePath string) error {
 	dir, err := GlobalSkillDir(homeDir, target)
 	if err != nil {
@@ -84,10 +88,12 @@ func linkDir(dir, name, storePath string) error {
 	return nil
 }
 
+// UnlinkAll removes a skill link from every project-scoped target directory.
 func UnlinkAll(projectRoot string, targets []string, name string) error {
 	return unlinkAll(projectRoot, false, targets, name)
 }
 
+// UnlinkAllGlobal removes a skill link from every global-scoped target directory.
 func UnlinkAllGlobal(homeDir string, targets []string, name string) error {
 	return unlinkAll(homeDir, true, targets, name)
 }
@@ -105,6 +111,7 @@ func unlinkAll(baseDir string, global bool, targets []string, name string) error
 	return nil
 }
 
+// Unlink removes a skill link from one project-scoped target directory.
 func Unlink(projectRoot, target, name string) error {
 	dir, err := SkillDir(projectRoot, target)
 	if err != nil {
@@ -113,6 +120,7 @@ func Unlink(projectRoot, target, name string) error {
 	return unlinkDir(dir, name)
 }
 
+// UnlinkGlobal removes a skill link from one global-scoped target directory.
 func UnlinkGlobal(homeDir, target, name string) error {
 	dir, err := GlobalSkillDir(homeDir, target)
 	if err != nil {
@@ -139,10 +147,12 @@ func unlinkDir(dir, name string) error {
 	return nil
 }
 
+// SkillDir resolves a target name to its project-scoped directory.
 func SkillDir(projectRoot, target string) (string, error) {
 	return skillDir(projectRoot, false, target)
 }
 
+// GlobalSkillDir resolves a target name to its global-scoped directory.
 func GlobalSkillDir(homeDir, target string) (string, error) {
 	return skillDir(homeDir, true, target)
 }
@@ -249,6 +259,8 @@ func resolveScopedDir(baseDir, path, target string) (string, error) {
 		return "", fmt.Errorf("custom target %q would install skills into the managed scope root; use a subdirectory", target)
 	}
 
+	// Walk each existing component with Lstat/EvalSymlinks so an in-scope lexical
+	// path cannot escape the managed base through a symlink hop.
 	parts := strings.Split(rel, string(filepath.Separator))
 	currentLex := baseDir
 	currentReal := baseReal

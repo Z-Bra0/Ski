@@ -13,11 +13,13 @@ const (
 	CurrentVersion = 1
 )
 
+// Lockfile records the resolved, reproducible state for an active scope.
 type Lockfile struct {
 	Version int     `json:"version"`
 	Skills  []Skill `json:"skills"`
 }
 
+// Skill records one locked skill entry inside a Lockfile.
 type Skill struct {
 	Name          string   `json:"name"`
 	Source        string   `json:"source"`
@@ -28,6 +30,7 @@ type Skill struct {
 	Targets       []string `json:"targets,omitempty"`
 }
 
+// Default returns an empty lockfile using the current schema version.
 func Default() Lockfile {
 	return Lockfile{
 		Version: CurrentVersion,
@@ -35,6 +38,7 @@ func Default() Lockfile {
 	}
 }
 
+// ReadFile reads, decodes, and validates a lockfile from disk.
 func ReadFile(path string) (*Lockfile, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -51,6 +55,7 @@ func ReadFile(path string) (*Lockfile, error) {
 	return &lf, nil
 }
 
+// WriteFile validates and writes a lockfile to disk.
 func WriteFile(path string, lf Lockfile) error {
 	if err := lf.Validate(); err != nil {
 		return err
@@ -64,6 +69,7 @@ func WriteFile(path string, lf Lockfile) error {
 	return os.WriteFile(path, data, 0o644)
 }
 
+// Validate checks schema version and required locked fields.
 func (lf Lockfile) Validate() error {
 	if lf.Version != CurrentVersion {
 		return fmt.Errorf("unsupported lockfile version %d", lf.Version)
@@ -92,10 +98,12 @@ func (lf Lockfile) Validate() error {
 	return nil
 }
 
+// Path returns the project-local lockfile path rooted at dir.
 func Path(dir string) string {
 	return filepath.Join(dir, FileName)
 }
 
+// GlobalPath returns the global lockfile path rooted at homeDir.
 func GlobalPath(homeDir string) string {
 	return filepath.Join(homeDir, ".ski", GlobalFileName)
 }

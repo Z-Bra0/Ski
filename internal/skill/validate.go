@@ -15,15 +15,17 @@ const FileName = "SKILL.md"
 
 var namePattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
+// Metadata is the validated YAML frontmatter extracted from SKILL.md.
 type Metadata struct {
-	Name         string            `yaml:"name"`
-	Description  string            `yaml:"description"`
-	License      string            `yaml:"license,omitempty"`
-	Compatibility string           `yaml:"compatibility,omitempty"`
-	Metadata     map[string]string `yaml:"metadata,omitempty"`
-	AllowedTools string            `yaml:"allowed-tools,omitempty"`
+	Name          string            `yaml:"name"`
+	Description   string            `yaml:"description"`
+	License       string            `yaml:"license,omitempty"`
+	Compatibility string            `yaml:"compatibility,omitempty"`
+	Metadata      map[string]string `yaml:"metadata,omitempty"`
+	AllowedTools  string            `yaml:"allowed-tools,omitempty"`
 }
 
+// ValidateDir validates the SKILL.md file for dir and returns its metadata.
 func ValidateDir(dir string, expectedName string) (*Metadata, error) {
 	path := filepath.Join(dir, FileName)
 	data, err := os.ReadFile(path)
@@ -53,6 +55,7 @@ func ValidateDir(dir string, expectedName string) (*Metadata, error) {
 	return &meta, nil
 }
 
+// Validate checks the metadata against the v1 skill constraints.
 func (m Metadata) Validate(expectedName string) error {
 	if len(m.Name) == 0 {
 		return fmt.Errorf("name is required")

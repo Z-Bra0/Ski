@@ -12,11 +12,13 @@ import (
 	"ski/internal/store"
 )
 
+// DoctorFinding describes one inconsistency found by Service.Doctor.
 type DoctorFinding struct {
 	Skill   string
 	Message string
 }
 
+// String formats a DoctorFinding for CLI display.
 func (f DoctorFinding) String() string {
 	if f.Skill == "" {
 		return f.Message

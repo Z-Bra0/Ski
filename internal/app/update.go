@@ -13,6 +13,7 @@ import (
 	"ski/internal/store"
 )
 
+// UpdateInfo reports the current and latest commit for one skill update check.
 type UpdateInfo struct {
 	Name          string
 	CurrentCommit string
@@ -30,6 +31,7 @@ type updateTargetChange struct {
 	DesiredPath  string
 }
 
+// CheckUpdates reports which selected skills have newer upstream commits available.
 func (s Service) CheckUpdates(name string) ([]UpdateInfo, error) {
 	doc, lf, err := s.loadProjectState()
 	if err != nil {
@@ -74,6 +76,7 @@ func (s Service) CheckUpdates(name string) ([]UpdateInfo, error) {
 	return updates, nil
 }
 
+// Update resolves and installs newer commits for the selected skills.
 func (s Service) Update(name string) ([]UpdateInfo, error) {
 	doc, lf, err := s.loadProjectState()
 	if err != nil {

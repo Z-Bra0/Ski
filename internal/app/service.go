@@ -26,6 +26,8 @@ type Service struct {
 	unlinkAllFn func(targets []string, name string) error
 }
 
+// MultiSkillSelectionError reports that a repository contains multiple skills and
+// the caller must choose one or more of them explicitly.
 type MultiSkillSelectionError struct {
 	Skills []string
 }

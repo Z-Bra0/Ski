@@ -21,30 +21,35 @@ var renameDir = os.Rename
 
 const maxSkillDiscoveryDepth = 3
 
+// Result describes one selected skill inside a stored repository snapshot.
 type Result struct {
 	Commit    string
 	Integrity string
 	Path      string
 }
 
+// RepoResult describes a discovered repository snapshot and its skills.
 type RepoResult struct {
 	Commit string
 	Root   string
 	Skills []DiscoveredSkill
 }
 
+// DiscoveredSkill identifies one skill directory inside a repository snapshot.
 type DiscoveredSkill struct {
 	Name         string
 	RelativePath string
 	Path         string
 }
 
+// DiscoverGit fetches or loads a git repository snapshot from the shared store.
 func DiscoverGit(projectRoot, homeDir string, spec source.Git) (RepoResult, error) {
 	storeKey, err := spec.DeriveName()
 	if err != nil {
 		return RepoResult{}, err
 	}
 
+	// Reuse an existing stored snapshot when we can cheaply resolve the commit.
 	if commit, ok := resolveStoreCommit(projectRoot, spec); ok {
 		storePath := filepath.Join(homeDir, ".ski", "store", "git", storeKey, commit)
 		repo, err := loadStoredRepo(storePath, commit)
@@ -98,6 +103,7 @@ func DiscoverGit(projectRoot, homeDir string, spec source.Git) (RepoResult, erro
 	if err := os.MkdirAll(filepath.Dir(storePath), 0o755); err != nil {
 		return RepoResult{}, fmt.Errorf("mkdir %s: %w", filepath.Dir(storePath), err)
 	}
+	// The store keeps plain snapshots, not working clones with git metadata.
 	if err := os.RemoveAll(filepath.Join(checkoutDir, ".git")); err != nil {
 		return RepoResult{}, fmt.Errorf("remove git metadata: %w", err)
 	}
@@ -108,6 +114,7 @@ func DiscoverGit(projectRoot, homeDir string, spec source.Git) (RepoResult, erro
 	return buildRepoResult(storePath, commit, skills), nil
 }
 
+// EnsureGit ensures a selected skill is present in the store and returns its path.
 func EnsureGit(projectRoot, homeDir string, spec source.Git, expectedName string) (Result, error) {
 	repo, err := DiscoverGit(projectRoot, homeDir, spec)
 	if err != nil {
@@ -127,6 +134,7 @@ func EnsureGit(projectRoot, homeDir string, spec source.Git, expectedName string
 	return Result{Commit: repo.Commit, Integrity: integrity, Path: selected.Path}, nil
 }
 
+// FindGit locates an already-stored git snapshot at a specific commit.
 func FindGit(homeDir string, spec source.Git, commit string, expectedName string) (Result, error) {
 	storeKey, err := spec.DeriveName()
 	if err != nil {
@@ -322,6 +330,8 @@ func moveDirIntoStore(src, dst string) error {
 		return err
 	}
 
+	// Cross-device renames fail with EXDEV, so stage a full copy on the target
+	// filesystem and then do the final rename there.
 	stageRoot, err := os.MkdirTemp(filepath.Dir(dst), "."+filepath.Base(dst)+"-tmp-")
 	if err != nil {
 		return fmt.Errorf("create store staging dir: %w", err)
@@ -338,6 +348,7 @@ func moveDirIntoStore(src, dst string) error {
 	return nil
 }
 
+// HashDir returns the canonical SHA-256 hash for a stored snapshot directory.
 func HashDir(root string) (string, error) {
 	hasher := sha256.New()
 	if err := hashDir(hasher, root, ""); err != nil {
