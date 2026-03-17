@@ -85,3 +85,9 @@ ski doctor [-g]                  # check links and lock/store consistency
 - [DECISIONS.md](DECISIONS.md) — design decisions and rationale
 
 MVP source support is git repositories via canonical `git:` sources or bare URL-form sources such as `https://...` and `file://...`. `github:` may be added later as a convenience alias over Git-hosted repositories.
+
+---
+
+## License
+
+GPL-3.0. See [LICENSE](LICENSE).
