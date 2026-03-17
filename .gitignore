@@ -1,6 +1,7 @@
 # Binary
 /ski
-dist/
+dist/*
+!dist/.gitkeep
 
 # Go
 *.exe

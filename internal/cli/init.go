@@ -11,6 +11,8 @@ import (
 	"ski/internal/target"
 )
 
+var initBuiltInTargets = []string{"claude", "codex", "cursor", "openclaw"}
+
 func newInitCmd(opts Options) *cobra.Command {
 	var targets []string
 
@@ -23,10 +25,13 @@ func newInitCmd(opts Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if err := svc.CheckInitAvailable(); err != nil {
+				return err
+			}
 
 			selectedTargets := append([]string(nil), targets...)
 			if len(selectedTargets) == 0 && opts.IsTTY() {
-				selectedTargets, err = promptForInitTargets(cmd, opts, svc)
+				selectedTargets, err = promptForInitTargets(cmd, opts)
 				if err != nil {
 					return err
 				}
@@ -61,41 +66,21 @@ func newInitCmd(opts Options) *cobra.Command {
 	return cmd
 }
 
-func promptForInitTargets(cmd *cobra.Command, opts Options, svc app.Service) ([]string, error) {
+func promptForInitTargets(cmd *cobra.Command, opts Options) ([]string, error) {
 	promptOpts := opts
 	promptOpts.Stdin = cmd.InOrStdin()
 	promptOpts.Stdout = cmd.OutOrStdout()
 
 	builtins, err := runMultiSelectPrompt(promptOpts, MultiSelectRequest{
 		Title:       "Select targets",
-		Description: "Choose built-in targets to initialize now. Leave empty to configure them later.",
-		Options:     []string{"claude", "codex", "cursor", "openclaw"},
+		Description: "Choose built-in targets to initialize now. Use space to toggle multiple items and enter to confirm. Leave empty to configure them later.",
+		Options:     append([]string{"all"}, initBuiltInTargets...),
+		Height:      10,
 	})
 	if err != nil {
 		return nil, err
 	}
-
-	customDescription := "Optional. Enter additional target directories as comma-separated paths relative to the project root."
-	placeholder := "./agent-skills/claude"
-	if svc.Global {
-		customDescription = "Optional. Enter additional target directories as comma-separated paths relative to your home directory. You may also use ~/..."
-		placeholder = "agent-skills/claude"
-	}
-
-	customInput, err := runTextPrompt(promptOpts, TextPromptRequest{
-		Title:       "Custom target directories",
-		Description: customDescription,
-		Placeholder: placeholder,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	customTargets, err := normalizeInitTargets(splitCommaList(customInput), svc, true)
-	if err != nil {
-		return nil, err
-	}
-	return dedupeStrings(append(builtins, customTargets...)), nil
+	return dedupeStrings(expandInitBuiltInSelections(builtins)), nil
 }
 
 func normalizeInitTargets(values []string, svc app.Service, allowBareCustom bool) ([]string, error) {
@@ -128,11 +113,20 @@ func normalizeInitTargets(values []string, svc app.Service, allowBareCustom bool
 	return normalized, nil
 }
 
-func splitCommaList(raw string) []string {
-	if strings.TrimSpace(raw) == "" {
-		return nil
+func expandInitBuiltInSelections(values []string) []string {
+	expanded := make([]string, 0, len(values)+len(initBuiltInTargets))
+	includeAll := false
+	for _, value := range values {
+		if strings.TrimSpace(value) == "all" {
+			includeAll = true
+			continue
+		}
+		expanded = append(expanded, value)
 	}
-	return strings.Split(raw, ",")
+	if !includeAll {
+		return expanded
+	}
+	return append(append([]string(nil), initBuiltInTargets...), expanded...)
 }
 
 func dedupeStrings(values []string) []string {
@@ -149,10 +143,10 @@ func dedupeStrings(values []string) []string {
 }
 
 func isBuiltInTarget(value string) bool {
-	switch value {
-	case "claude", "codex", "cursor", "openclaw":
-		return true
-	default:
-		return false
+	for _, targetName := range initBuiltInTargets {
+		if value == targetName {
+			return true
+		}
 	}
+	return false
 }

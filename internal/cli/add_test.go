@@ -103,6 +103,76 @@ func TestAddFetchesWritesLockfileAndLinksTargets(t *testing.T) {
 	}
 }
 
+func TestAddAcceptsExistingMatchingLinkAndFillsMissingTargets(t *testing.T) {
+	t.Parallel()
+
+	repoPath, commit := createGitRepo(t, "repo-map", "repo-map")
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	path := filepath.Join(projectDir, manifest.FileName)
+	if err := manifest.WriteFile(path, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude", "codex"},
+		Skills:  []manifest.Skill{},
+	}); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	storePath := filepath.Join(homeDir, ".ski", "store", "git", "repo-map", commit)
+	existingLink := filepath.Join(projectDir, ".codex", "skills", "repo-map")
+	if err := os.MkdirAll(filepath.Dir(existingLink), 0o755); err != nil {
+		t.Fatalf("MkdirAll(existing link dir) error = %v", err)
+	}
+	if err := os.Symlink(storePath, existingLink); err != nil {
+		t.Fatalf("Symlink(existing link) error = %v", err)
+	}
+
+	cmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	cmd.SetArgs([]string{"add", "git:" + repoPath + "@v1.0.0"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	doc, err := manifest.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(manifest) error = %v", err)
+	}
+	wantManifest := manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude", "codex"},
+		Skills: []manifest.Skill{
+			{
+				Name:          "repo-map",
+				Source:        "git:" + repoPath + "@v1.0.0",
+				UpstreamSkill: "repo-map",
+			},
+		},
+	}
+	if !reflect.DeepEqual(*doc, wantManifest) {
+		t.Fatalf("manifest = %#v, want %#v", *doc, wantManifest)
+	}
+
+	for _, linkPath := range []string{
+		filepath.Join(projectDir, ".claude", "skills", "repo-map"),
+		filepath.Join(projectDir, ".codex", "skills", "repo-map"),
+	} {
+		targetPath, err := os.Readlink(linkPath)
+		if err != nil {
+			t.Fatalf("Readlink(%q) error = %v", linkPath, err)
+		}
+		if targetPath != storePath {
+			t.Fatalf("symlink target for %s = %q, want %q", linkPath, targetPath, storePath)
+		}
+	}
+}
+
 func TestAddSupportsNameOverride(t *testing.T) {
 	t.Parallel()
 

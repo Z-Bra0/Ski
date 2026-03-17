@@ -72,6 +72,40 @@ func TestInitFailsWhenManifestExists(t *testing.T) {
 	}
 }
 
+func TestInitDoesNotPromptWhenManifestExists(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, manifest.FileName)
+	if err := manifest.WriteFile(path, manifest.Default()); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", path, err)
+	}
+
+	cmd := NewRootCmd(Options{
+		Getwd:  func() (string, error) { return dir, nil },
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+		IsTTY:  func() bool { return true },
+		PromptMultiSelect: func(req MultiSelectRequest) ([]string, error) {
+			t.Fatal("PromptMultiSelect should not be called when manifest already exists")
+			return nil, nil
+		},
+		PromptInput: func(req TextPromptRequest) (string, error) {
+			t.Fatal("PromptInput should not be called when manifest already exists")
+			return "", nil
+		},
+	})
+	cmd.SetArgs([]string{"init"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want already exists error")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("Execute() error = %v, want already exists", err)
+	}
+}
+
 func TestInitCreatesGlobalManifest(t *testing.T) {
 	t.Parallel()
 
@@ -115,13 +149,17 @@ func TestInitPromptsForTargetsOnTTY(t *testing.T) {
 			if req.Title != "Select targets" {
 				t.Fatalf("prompt title = %q, want target selection title", req.Title)
 			}
-			return []string{"claude", "codex"}, nil
-		},
-		PromptInput: func(req TextPromptRequest) (string, error) {
-			if req.Title != "Custom target directories" {
-				t.Fatalf("prompt title = %q, want custom target title", req.Title)
+			if req.Height != 10 {
+				t.Fatalf("prompt height = %d, want 10", req.Height)
 			}
-			return "./agent-skills/claude", nil
+			if !strings.Contains(req.Description, "space to toggle multiple items") {
+				t.Fatalf("prompt description = %q, want multi-select hint", req.Description)
+			}
+			wantOptions := []string{"all", "claude", "codex", "cursor", "openclaw"}
+			if !reflect.DeepEqual(req.Options, wantOptions) {
+				t.Fatalf("prompt options = %#v, want %#v", req.Options, wantOptions)
+			}
+			return []string{"claude", "codex"}, nil
 		},
 	})
 	cmd.SetArgs([]string{"init"})
@@ -136,7 +174,41 @@ func TestInitPromptsForTargetsOnTTY(t *testing.T) {
 	}
 	want := manifest.Manifest{
 		Version: 1,
-		Targets: []string{"claude", "codex", "dir:./agent-skills/claude"},
+		Targets: []string{"claude", "codex"},
+		Skills:  []manifest.Skill{},
+	}
+	if !reflect.DeepEqual(*doc, want) {
+		t.Fatalf("manifest = %#v, want %#v", *doc, want)
+	}
+}
+
+func TestInitPromptAllExpandsBuiltInTargets(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	cmd := NewRootCmd(Options{
+		Getwd:  func() (string, error) { return dir, nil },
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+		IsTTY:  func() bool { return true },
+		PromptMultiSelect: func(req MultiSelectRequest) ([]string, error) {
+			return []string{"all"}, nil
+		},
+	})
+	cmd.SetArgs([]string{"init"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	doc, err := manifest.ReadFile(filepath.Join(dir, manifest.FileName))
+	if err != nil {
+		t.Fatalf("ReadFile(manifest) error = %v", err)
+	}
+	want := manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude", "codex", "cursor", "openclaw"},
 		Skills:  []manifest.Skill{},
 	}
 	if !reflect.DeepEqual(*doc, want) {
@@ -158,10 +230,6 @@ func TestInitWithTargetFlagsSkipsPrompt(t *testing.T) {
 			t.Fatal("PromptMultiSelect should not be called when --target is provided")
 			return nil, nil
 		},
-		PromptInput: func(req TextPromptRequest) (string, error) {
-			t.Fatal("PromptInput should not be called when --target is provided")
-			return "", nil
-		},
 	})
 	cmd.SetArgs([]string{"init", "--target", "claude", "--target", "dir:./agent-skills/claude"})
 
@@ -176,45 +244,6 @@ func TestInitWithTargetFlagsSkipsPrompt(t *testing.T) {
 	want := manifest.Manifest{
 		Version: 1,
 		Targets: []string{"claude", "dir:./agent-skills/claude"},
-		Skills:  []manifest.Skill{},
-	}
-	if !reflect.DeepEqual(*doc, want) {
-		t.Fatalf("manifest = %#v, want %#v", *doc, want)
-	}
-}
-
-func TestInitGlobalPromptSupportsCustomHomeRelativeDir(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	homeDir := t.TempDir()
-
-	cmd := NewRootCmd(Options{
-		Getwd:      func() (string, error) { return dir, nil },
-		GetHomeDir: func() (string, error) { return homeDir, nil },
-		Stdout:     &bytes.Buffer{},
-		Stderr:     &bytes.Buffer{},
-		IsTTY:      func() bool { return true },
-		PromptMultiSelect: func(req MultiSelectRequest) ([]string, error) {
-			return []string{"claude"}, nil
-		},
-		PromptInput: func(req TextPromptRequest) (string, error) {
-			return "~/agent-skills/claude", nil
-		},
-	})
-	cmd.SetArgs([]string{"init", "-g"})
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute() error = %v", err)
-	}
-
-	doc, err := manifest.ReadFile(manifest.GlobalPath(homeDir))
-	if err != nil {
-		t.Fatalf("ReadFile(global manifest) error = %v", err)
-	}
-	want := manifest.Manifest{
-		Version: 1,
-		Targets: []string{"claude", "dir:~/agent-skills/claude"},
 		Skills:  []manifest.Skill{},
 	}
 	if !reflect.DeepEqual(*doc, want) {

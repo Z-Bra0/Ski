@@ -102,7 +102,7 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 			return nil, err
 		}
 
-		if err := s.preflightAddLinks(effectiveTargets, localName); err != nil {
+		if err := s.preflightAddLinks(effectiveTargets, localName, stored.Path); err != nil {
 			return nil, err
 		}
 
@@ -179,7 +179,7 @@ func findSkillByIdentity(skills []manifest.Skill, sourceValue, upstreamSkill str
 	return manifest.Skill{}, false, nil
 }
 
-func (s Service) preflightAddLinks(targets []string, name string) error {
+func (s Service) preflightAddLinks(targets []string, name, storePath string) error {
 	seen := make(map[string]string, len(targets))
 	for _, targetName := range targets {
 		dir, err := s.skillDir(targetName)
@@ -191,8 +191,21 @@ func (s Service) preflightAddLinks(targets []string, name string) error {
 		}
 		seen[dir] = targetName
 		linkPath := filepath.Join(dir, name)
-		if _, err := os.Lstat(linkPath); err == nil {
-			return fmt.Errorf("%s already exists", linkPath)
+		info, err := os.Lstat(linkPath)
+		if err == nil {
+			if info.Mode()&os.ModeSymlink == 0 {
+				return fmt.Errorf("%s already exists and is not a symlink", linkPath)
+			}
+			current, err := os.Readlink(linkPath)
+			if err != nil {
+				return fmt.Errorf("readlink %s: %w", linkPath, err)
+			}
+			// Treat an existing matching link as already reconciled so add can
+			// fill in the remaining targets and persist manifest/lock state.
+			if current == storePath {
+				continue
+			}
+			return fmt.Errorf("%s already links to %s", linkPath, current)
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("lstat %s: %w", linkPath, err)
 		}

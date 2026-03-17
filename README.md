@@ -25,8 +25,8 @@ Deferred:
 ## Build
 
 ```bash
-go build ./cmd/ski
-go run ./cmd/ski -- help
+make build
+make test
 ```
 
 ---
@@ -55,7 +55,7 @@ URL-form git sources may omit the `git:` prefix, including `https://...`, `ssh:/
 
 Custom target folders use a `dir:` prefix. In local scope, `dir:./agent-skills/claude` resolves relative to the repo root. In global scope, `dir:agent-skills/claude` resolves relative to the user home directory, and `~` expansion is allowed.
 
-On a TTY, `ski init` now prompts for built-in targets and optional custom target directories. In scripts or non-interactive environments, use `ski init --target claude --target dir:./agent-skills/claude`.
+On a TTY, `ski init` prompts for built-in targets. For custom target directories, edit `ski.toml` manually or use `ski init --target ...` in scripts and non-interactive environments.
 
 ---
 

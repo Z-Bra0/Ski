@@ -177,7 +177,8 @@ If `--target` flags are provided, `ski init` writes them into the new manifest.
 If no `--target` flags are provided and `ski init` is running on a TTY, it prompts for:
 
 - built-in targets such as `claude` and `codex`
-- optional custom target directories, written as `dir:<path>`
+
+Custom target directories are not prompted for during `ski init`. Add them later by editing the manifest manually, or pass them explicitly with `--target dir:<path>`.
 
 If no targets are selected, the initial manifest contains `version = 1` and `targets = []`.
 

@@ -13,6 +13,7 @@ type MultiSelectRequest struct {
 	Description string
 	Options     []string
 	MinSelected int
+	Height      int
 }
 
 // TextPromptRequest describes a CLI text input prompt.
@@ -37,7 +38,7 @@ func runHuhMultiSelectPrompt(input io.Reader, output io.Writer, req MultiSelectR
 		Value(&selected).
 		Options(huh.NewOptions(req.Options...)...).
 		Filterable(len(req.Options) > 8).
-		Height(promptHeight(len(req.Options)))
+		Height(resolvePromptHeight(req))
 	if req.Description != "" {
 		field = field.Description(req.Description)
 	}
@@ -109,13 +110,22 @@ func normalizeSelections(selected, options []string) []string {
 	return out
 }
 
+func resolvePromptHeight(req MultiSelectRequest) int {
+	if req.Height > 0 {
+		return req.Height
+	}
+	return promptHeight(len(req.Options))
+}
+
 func promptHeight(numOptions int) int {
 	switch {
-	case numOptions <= 4:
-		return numOptions
-	case numOptions <= 8:
+	case numOptions <= 3:
 		return 6
+	case numOptions <= 6:
+		return numOptions + 3
+	case numOptions <= 8:
+		return numOptions + 2
 	default:
-		return 8
+		return 12
 	}
 }

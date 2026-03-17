@@ -154,13 +154,22 @@ func canonicalizeGlobalLocalPath(raw string, cwd string, homeDir string, allowRe
 	}
 }
 
+// CheckInitAvailable reports whether the active-scope manifest can be created.
+func (s Service) CheckInitAvailable() error {
+	path := s.manifestPath()
+	if _, err := os.Stat(path); err == nil {
+		return fmt.Errorf("%s already exists", path)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("stat %s: %w", path, err)
+	}
+	return nil
+}
+
 // Init creates a new manifest in the active scope.
 func (s Service) Init() (string, error) {
 	path := s.manifestPath()
-	if _, err := os.Stat(path); err == nil {
-		return "", fmt.Errorf("%s already exists", path)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return "", fmt.Errorf("stat %s: %w", path, err)
+	if err := s.CheckInitAvailable(); err != nil {
+		return "", err
 	}
 
 	doc := manifest.Default()
