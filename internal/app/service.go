@@ -19,6 +19,11 @@ import (
 type Service struct {
 	ProjectDir string
 	HomeDir    string
+	Global     bool
+
+	// Test hooks — nil in production; set in tests to inject failures.
+	linkAllFn   func(targets []string, name, storePath string) error
+	unlinkAllFn func(targets []string, name string) error
 }
 
 type UpdateInfo struct {
@@ -45,8 +50,25 @@ type MultiSkillSelectionError struct {
 	Skills []string
 }
 
-var linkAll = target.LinkAll
-var unlinkAll = target.UnlinkAll
+func (s Service) linkAll(targets []string, name, storePath string) error {
+	if s.linkAllFn != nil {
+		return s.linkAllFn(targets, name, storePath)
+	}
+	if s.Global {
+		return target.LinkAllGlobal(s.HomeDir, targets, name, storePath)
+	}
+	return target.LinkAll(s.ProjectDir, targets, name, storePath)
+}
+
+func (s Service) unlinkAll(targets []string, name string) error {
+	if s.unlinkAllFn != nil {
+		return s.unlinkAllFn(targets, name)
+	}
+	if s.Global {
+		return target.UnlinkAllGlobal(s.HomeDir, targets, name)
+	}
+	return target.UnlinkAll(s.ProjectDir, targets, name)
+}
 
 func (f DoctorFinding) String() string {
 	if f.Skill == "" {
@@ -59,10 +81,108 @@ func (e MultiSkillSelectionError) Error() string {
 	return fmt.Sprintf("multiple skills found in repository: %s", strings.Join(e.Skills, ", "))
 }
 
+func (s Service) manifestPath() string {
+	if s.Global {
+		return manifest.GlobalPath(s.HomeDir)
+	}
+	return filepath.Join(s.ProjectDir, manifest.FileName)
+}
+
+func (s Service) lockPath() string {
+	if s.Global {
+		return lockfile.GlobalPath(s.HomeDir)
+	}
+	return lockfile.Path(s.ProjectDir)
+}
+
+func (s Service) initHint() string {
+	if s.Global {
+		return "run `ski init -g` first"
+	}
+	return "run `ski init` first"
+}
+
+func (s Service) sourceResolveDir() string {
+	if s.Global {
+		return s.HomeDir
+	}
+	return s.ProjectDir
+}
+
+func (s Service) skillDir(targetName string) (string, error) {
+	if s.Global {
+		return target.GlobalSkillDir(s.HomeDir, targetName)
+	}
+	return target.SkillDir(s.ProjectDir, targetName)
+}
+
+func ensureParentDir(path string) error {
+	return os.MkdirAll(filepath.Dir(path), 0o755)
+}
+
+func (s Service) prepareAddSource(rawSource string) (source.Git, error) {
+	src, err := source.ParseGit(rawSource)
+	if err != nil {
+		return source.Git{}, err
+	}
+	if !s.Global {
+		return src, nil
+	}
+
+	return s.canonicalizeGlobalAddSource(src)
+}
+
+func (s Service) canonicalizeGlobalAddSource(src source.Git) (source.Git, error) {
+	if !src.IsLocalPath() {
+		return src, nil
+	}
+
+	url, err := canonicalizeGlobalLocalPath(src.URL, s.ProjectDir, s.HomeDir, true)
+	if err != nil {
+		return source.Git{}, fmt.Errorf("global git source %q: %w", src.URL, err)
+	}
+	src.URL = url
+	return src, nil
+}
+
+func (s Service) loadSourceForScope(rawSource string) (source.Git, error) {
+	src, err := source.ParseGit(rawSource)
+	if err != nil {
+		return source.Git{}, err
+	}
+	if !s.Global || !src.IsLocalPath() {
+		return src, nil
+	}
+
+	url, err := canonicalizeGlobalLocalPath(src.URL, s.ProjectDir, s.HomeDir, false)
+	if err != nil {
+		return source.Git{}, err
+	}
+	src.URL = url
+	return src, nil
+}
+
+func canonicalizeGlobalLocalPath(raw string, cwd string, homeDir string, allowRelative bool) (string, error) {
+	switch {
+	case raw == "~":
+		return homeDir, nil
+	case strings.HasPrefix(raw, "~/"):
+		return filepath.Join(homeDir, raw[2:]), nil
+	case strings.HasPrefix(raw, "~\\"):
+		return filepath.Join(homeDir, raw[2:]), nil
+	case filepath.IsAbs(raw):
+		return filepath.Clean(raw), nil
+	case allowRelative:
+		return filepath.Abs(filepath.Join(cwd, raw))
+	default:
+		return "", fmt.Errorf("relative local git source %q is not allowed in global scope; use an absolute path", raw)
+	}
+}
+
 // Init creates a new ski.toml in the project directory.
 // Returns the path of the created manifest.
 func (s Service) Init() (string, error) {
-	path := filepath.Join(s.ProjectDir, manifest.FileName)
+	path := s.manifestPath()
 	if _, err := os.Stat(path); err == nil {
 		return "", fmt.Errorf("%s already exists", path)
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -70,6 +190,9 @@ func (s Service) Init() (string, error) {
 	}
 
 	doc := manifest.Default()
+	if err := ensureParentDir(path); err != nil {
+		return "", fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
+	}
 	if err := manifest.WriteFile(path, doc); err != nil {
 		return "", fmt.Errorf("write %s: %w", path, err)
 	}
@@ -80,11 +203,11 @@ func (s Service) Init() (string, error) {
 // and writes both ski.toml and ski.lock.json.
 // Returns the skill names that were added.
 func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOverride string) ([]string, error) {
-	path := filepath.Join(s.ProjectDir, manifest.FileName)
+	path := s.manifestPath()
 	originalManifestData, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, fmt.Errorf("%s not found; run `ski init` first", path)
+			return nil, fmt.Errorf("%s not found; %s", path, s.initHint())
 		}
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
@@ -93,7 +216,7 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 
-	src, err := source.ParseGit(rawSource)
+	src, err := s.prepareAddSource(rawSource)
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +225,7 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 		return nil, fmt.Errorf("selected skills %v do not match source selectors %v", selectedSkills, src.Skills)
 	}
 
-	discovered, err := store.DiscoverGit(s.ProjectDir, s.HomeDir, src)
+	discovered, err := store.DiscoverGit(s.sourceResolveDir(), s.HomeDir, src)
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +245,7 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 		}
 	}
 
-	lockPath := lockfile.Path(s.ProjectDir)
+	lockPath := s.lockPath()
 	originalLockData, hadLockfile, err := readOptionalFile(lockPath)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", lockPath, err)
@@ -145,19 +268,19 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 		}
 		canonical := baseSource.WithSkills([]string{selectedSkillName}).String()
 
-		if existing, ok := findSkillByName(nextDoc.Skills, localName); ok {
+		if existing, ok := findSkill(nextDoc.Skills, func(s manifest.Skill) bool { return s.Name == localName }); ok {
 			return nil, fmt.Errorf("skill name %q already exists for source %q", localName, existing.Source)
 		}
-		if existing, ok := findSkillBySource(nextDoc.Skills, canonical); ok {
+		if existing, ok := findSkill(nextDoc.Skills, func(s manifest.Skill) bool { return s.Source == canonical }); ok {
 			return nil, fmt.Errorf("source %q already exists as skill %q", canonical, existing.Name)
 		}
 
-		stored, err := store.EnsureGit(s.ProjectDir, s.HomeDir, baseSource.WithSkills([]string{selectedSkillName}), selectedSkillName)
+		stored, err := store.EnsureGit(s.sourceResolveDir(), s.HomeDir, baseSource.WithSkills([]string{selectedSkillName}), selectedSkillName)
 		if err != nil {
 			return nil, err
 		}
 
-		if err := preflightAddLinks(s.ProjectDir, effectiveTargets, localName); err != nil {
+		if err := s.preflightAddLinks(effectiveTargets, localName); err != nil {
 			return nil, err
 		}
 
@@ -186,10 +309,16 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 		added = append(added, localName)
 	}
 
+	if err := ensureParentDir(lockPath); err != nil {
+		return nil, fmt.Errorf("mkdir %s: %w", filepath.Dir(lockPath), err)
+	}
 	if err := lockfile.WriteFile(lockPath, nextLock); err != nil {
 		return nil, fmt.Errorf("write %s: %w", lockPath, err)
 	}
 
+	if err := ensureParentDir(path); err != nil {
+		return nil, fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
+	}
 	if err := manifest.WriteFile(path, nextDoc); err != nil {
 		if restoreErr := restoreProjectFiles(path, originalManifestData, lockPath, originalLockData, hadLockfile); restoreErr != nil {
 			return nil, fmt.Errorf("write %s: %w (rollback failed: %v)", path, err, restoreErr)
@@ -199,8 +328,8 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 
 	linked := make([]plannedAdd, 0, len(planned))
 	for _, plan := range planned {
-		if err := linkAll(s.ProjectDir, plan.Targets, plan.Name, plan.StorePath); err != nil {
-			rollbackErr := rollbackAddSelected(s.ProjectDir, linked, path, originalManifestData, lockPath, originalLockData, hadLockfile)
+		if err := s.linkAll(plan.Targets, plan.Name, plan.StorePath); err != nil {
+			rollbackErr := s.rollbackAddSelected(linked, path, originalManifestData, lockPath, originalLockData, hadLockfile)
 			if rollbackErr != nil {
 				return nil, fmt.Errorf("%w (rollback failed: %v)", err, rollbackErr)
 			}
@@ -212,18 +341,9 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 	return added, nil
 }
 
-func findSkillByName(skills []manifest.Skill, name string) (manifest.Skill, bool) {
+func findSkill(skills []manifest.Skill, match func(manifest.Skill) bool) (manifest.Skill, bool) {
 	for _, skill := range skills {
-		if skill.Name == name {
-			return skill, true
-		}
-	}
-	return manifest.Skill{}, false
-}
-
-func findSkillBySource(skills []manifest.Skill, source string) (manifest.Skill, bool) {
-	for _, skill := range skills {
-		if skill.Source == source {
+		if match(skill) {
 			return skill, true
 		}
 	}
@@ -298,12 +418,17 @@ func cloneLockfile(doc lockfile.Lockfile) lockfile.Lockfile {
 	return clone
 }
 
-func preflightAddLinks(projectRoot string, targets []string, name string) error {
+func (s Service) preflightAddLinks(targets []string, name string) error {
+	seen := make(map[string]string, len(targets))
 	for _, targetName := range targets {
-		dir, err := target.SkillDir(projectRoot, targetName)
+		dir, err := s.skillDir(targetName)
 		if err != nil {
 			return err
 		}
+		if previous, ok := seen[dir]; ok {
+			return fmt.Errorf("targets %q and %q resolve to the same directory %s", previous, targetName, dir)
+		}
+		seen[dir] = targetName
 		linkPath := filepath.Join(dir, name)
 		if _, err := os.Lstat(linkPath); err == nil {
 			return fmt.Errorf("%s already exists", linkPath)
@@ -330,10 +455,10 @@ func restoreProjectFiles(manifestPath string, manifestData []byte, lockPath stri
 	return nil
 }
 
-func rollbackAddSelected(projectRoot string, linked []plannedAdd, manifestPath string, manifestData []byte, lockPath string, lockData []byte, hadLockfile bool) error {
+func (s Service) rollbackAddSelected(linked []plannedAdd, manifestPath string, manifestData []byte, lockPath string, lockData []byte, hadLockfile bool) error {
 	var rollbackErr error
 	for i := len(linked) - 1; i >= 0; i-- {
-		if err := unlinkAll(projectRoot, linked[i].Targets, linked[i].Name); err != nil {
+		if err := s.unlinkAll(linked[i].Targets, linked[i].Name); err != nil {
 			rollbackErr = errors.Join(rollbackErr, err)
 		}
 	}
@@ -347,16 +472,16 @@ func rollbackAddSelected(projectRoot string, linked []plannedAdd, manifestPath s
 // verifies integrity against the lockfile, and links them to configured targets.
 // Returns the number of skills processed.
 func (s Service) Install() (int, error) {
-	manifestPath := filepath.Join(s.ProjectDir, manifest.FileName)
+	manifestPath := s.manifestPath()
 	doc, err := manifest.ReadFile(manifestPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return 0, fmt.Errorf("%s not found; run `ski init` first", manifestPath)
+			return 0, fmt.Errorf("%s not found; %s", manifestPath, s.initHint())
 		}
 		return 0, fmt.Errorf("read %s: %w", manifestPath, err)
 	}
 
-	lockPath := lockfile.Path(s.ProjectDir)
+	lockPath := s.lockPath()
 	lf, err := readOrDefaultLockfile(lockPath)
 	if err != nil {
 		return 0, fmt.Errorf("read %s: %w", lockPath, err)
@@ -364,7 +489,7 @@ func (s Service) Install() (int, error) {
 
 	count := 0
 	for _, mSkill := range doc.Skills {
-		src, err := source.ParseGit(mSkill.Source)
+		src, err := s.loadSourceForScope(mSkill.Source)
 		if err != nil {
 			return count, fmt.Errorf("skill %q: %w", mSkill.Name, err)
 		}
@@ -375,7 +500,7 @@ func (s Service) Install() (int, error) {
 			src.Ref = lockedEntry.Commit
 		}
 
-		stored, err := store.EnsureGit(s.ProjectDir, s.HomeDir, src, mSkill.Name)
+		stored, err := store.EnsureGit(s.sourceResolveDir(), s.HomeDir, src, mSkill.Name)
 		if err != nil {
 			return count, fmt.Errorf("skill %q: %w", mSkill.Name, err)
 		}
@@ -386,7 +511,7 @@ func (s Service) Install() (int, error) {
 		}
 
 		effectiveTargets := effectiveTargetsForSkill(doc, mSkill)
-		if err := target.LinkAll(s.ProjectDir, effectiveTargets, mSkill.Name, stored.Path); err != nil {
+		if err := s.linkAll(effectiveTargets, mSkill.Name, stored.Path); err != nil {
 			return count, fmt.Errorf("skill %q: %w", mSkill.Name, err)
 		}
 
@@ -400,6 +525,9 @@ func (s Service) Install() (int, error) {
 		count++
 	}
 
+	if err := ensureParentDir(lockPath); err != nil {
+		return count, fmt.Errorf("mkdir %s: %w", filepath.Dir(lockPath), err)
+	}
 	if err := lockfile.WriteFile(lockPath, *lf); err != nil {
 		return count, fmt.Errorf("write %s: %w", lockPath, err)
 	}
@@ -410,28 +538,25 @@ func (s Service) Install() (int, error) {
 // Remove deletes a skill from ski.toml, ski.lock.json, and all target symlinks.
 // The store cache entry is left intact for potential reuse.
 func (s Service) Remove(name string) error {
-	manifestPath := filepath.Join(s.ProjectDir, manifest.FileName)
+	manifestPath := s.manifestPath()
 	doc, err := manifest.ReadFile(manifestPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("%s not found; run `ski init` first", manifestPath)
+			return fmt.Errorf("%s not found; %s", manifestPath, s.initHint())
 		}
 		return fmt.Errorf("read %s: %w", manifestPath, err)
 	}
 
-	ms, ok := findSkillByName(doc.Skills, name)
+	ms, ok := findSkill(doc.Skills, func(s manifest.Skill) bool { return s.Name == name })
 	if !ok {
-		return fmt.Errorf("skill %q not found in %s", name, manifest.FileName)
+		return fmt.Errorf("skill %q not found in %s", name, s.manifestPath())
 	}
 
-	// Effective manifest targets for this skill.
-	effectiveTargets := append([]string(nil), doc.Targets...)
-	if len(ms.Targets) > 0 {
-		effectiveTargets = ms.Targets
-	}
+	// Union manifest targets with lock targets so we clean up even if targets changed since install.
+	effectiveTargets := effectiveTargetsForSkill(doc, ms)
 
 	// Union with lock targets so we clean up even if targets changed since install.
-	lockPath := lockfile.Path(s.ProjectDir)
+	lockPath := s.lockPath()
 	lf, err := readOrDefaultLockfile(lockPath)
 	if err != nil {
 		return fmt.Errorf("read %s: %w", lockPath, err)
@@ -442,12 +567,12 @@ func (s Service) Remove(name string) error {
 
 	// Write metadata first so that if either write fails the symlinks still
 	// exist and the project remains in a consistent, retryable state.
-	doc.Skills = removeManifestSkill(doc.Skills, name)
+	doc.Skills = removeByName(doc.Skills, name, func(s manifest.Skill) string { return s.Name })
 	if err := manifest.WriteFile(manifestPath, *doc); err != nil {
 		return fmt.Errorf("write %s: %w", manifestPath, err)
 	}
 
-	lf.Skills = removeLockSkill(lf.Skills, name)
+	lf.Skills = removeByName(lf.Skills, name, func(s lockfile.Skill) string { return s.Name })
 	if err := lockfile.WriteFile(lockPath, *lf); err != nil {
 		return fmt.Errorf("write %s: %w", lockPath, err)
 	}
@@ -455,27 +580,17 @@ func (s Service) Remove(name string) error {
 	// Unlink last: if this fails, metadata is already clean and the orphaned
 	// symlink points to still-valid store data — user can remove it manually
 	// or re-run ski install to reconcile.
-	if err := target.UnlinkAll(s.ProjectDir, effectiveTargets, name); err != nil {
+	if err := s.unlinkAll(effectiveTargets, name); err != nil {
 		return fmt.Errorf("remove symlinks: %w", err)
 	}
 
 	return nil
 }
 
-func removeManifestSkill(skills []manifest.Skill, name string) []manifest.Skill {
-	out := make([]manifest.Skill, 0, len(skills))
+func removeByName[T any](skills []T, name string, getName func(T) string) []T {
+	out := make([]T, 0, len(skills))
 	for _, s := range skills {
-		if s.Name != name {
-			out = append(out, s)
-		}
-	}
-	return out
-}
-
-func removeLockSkill(skills []lockfile.Skill, name string) []lockfile.Skill {
-	out := make([]lockfile.Skill, 0, len(skills))
-	for _, s := range skills {
-		if s.Name != name {
+		if getName(s) != name {
 			out = append(out, s)
 		}
 	}
@@ -610,7 +725,7 @@ func (s Service) doctorSkillFindings(doc *manifest.Manifest, skill manifest.Skil
 		})
 	}
 
-	src, err := source.ParseGit(locked.Source)
+	src, err := s.loadSourceForScope(locked.Source)
 	if err != nil {
 		findings = append(findings, DoctorFinding{
 			Skill:   skill.Name,
@@ -655,7 +770,7 @@ func (s Service) doctorSkillFindings(doc *manifest.Manifest, skill manifest.Skil
 	}
 
 	for _, targetName := range targetsToInspect {
-		shouldExist := containsString(expectedTargets, targetName)
+		shouldExist := slices.Contains(expectedTargets, targetName)
 		findings = append(findings, s.doctorTargetFindings(skill.Name, targetName, storePath, shouldExist)...)
 	}
 
@@ -663,7 +778,7 @@ func (s Service) doctorSkillFindings(doc *manifest.Manifest, skill manifest.Skil
 }
 
 func (s Service) doctorTargetFindings(skillName, targetName, storePath string, shouldExist bool) []DoctorFinding {
-	dir, err := target.SkillDir(s.ProjectDir, targetName)
+	dir, err := s.skillDir(targetName)
 	if err != nil {
 		return []DoctorFinding{{
 			Skill:   skillName,
@@ -746,14 +861,6 @@ func sameStrings(a, b []string) bool {
 	return true
 }
 
-func containsString(items []string, want string) bool {
-	for _, item := range items {
-		if item == want {
-			return true
-		}
-	}
-	return false
-}
 
 func (s Service) CheckUpdates(name string) ([]UpdateInfo, error) {
 	doc, lf, err := s.loadProjectState()
@@ -768,11 +875,11 @@ func (s Service) CheckUpdates(name string) ([]UpdateInfo, error) {
 
 	updates := make([]UpdateInfo, 0, len(selected))
 	for _, mSkill := range selected {
-		src, err := source.ParseGit(mSkill.Source)
+		src, err := s.loadSourceForScope(mSkill.Source)
 		if err != nil {
 			return nil, fmt.Errorf("skill %q: %w", mSkill.Name, err)
 		}
-		latestCommit, pinned, err := resolveUpdateCommit(s.ProjectDir, src)
+		latestCommit, pinned, err := resolveUpdateCommit(s.sourceResolveDir(), src)
 		if err != nil {
 			return nil, fmt.Errorf("skill %q: %w", mSkill.Name, err)
 		}
@@ -812,11 +919,11 @@ func (s Service) Update(name string) ([]UpdateInfo, error) {
 
 	updates := make([]UpdateInfo, 0, len(selected))
 	for _, mSkill := range selected {
-		src, err := source.ParseGit(mSkill.Source)
+		src, err := s.loadSourceForScope(mSkill.Source)
 		if err != nil {
 			return nil, fmt.Errorf("skill %q: %w", mSkill.Name, err)
 		}
-		latestCommit, pinned, err := resolveUpdateCommit(s.ProjectDir, src)
+		latestCommit, pinned, err := resolveUpdateCommit(s.sourceResolveDir(), src)
 		if err != nil {
 			return nil, fmt.Errorf("skill %q: %w", mSkill.Name, err)
 		}
@@ -830,18 +937,18 @@ func (s Service) Update(name string) ([]UpdateInfo, error) {
 		}
 
 		src.Ref = latestCommit
-		stored, err := store.EnsureGit(s.ProjectDir, s.HomeDir, src, mSkill.Name)
+		stored, err := store.EnsureGit(s.sourceResolveDir(), s.HomeDir, src, mSkill.Name)
 		if err != nil {
 			return nil, fmt.Errorf("skill %q: %w", mSkill.Name, err)
 		}
 
 		targets := effectiveTargetsForSkill(doc, mSkill)
 		if hasLock {
-			if err := target.UnlinkAll(s.ProjectDir, unionStrings(targets, locked.Targets), mSkill.Name); err != nil {
+			if err := s.unlinkAll(unionStrings(targets, locked.Targets), mSkill.Name); err != nil {
 				return nil, fmt.Errorf("skill %q: %w", mSkill.Name, err)
 			}
 		}
-		if err := target.LinkAll(s.ProjectDir, targets, mSkill.Name, stored.Path); err != nil {
+		if err := s.linkAll(targets, mSkill.Name, stored.Path); err != nil {
 			return nil, fmt.Errorf("skill %q: %w", mSkill.Name, err)
 		}
 
@@ -863,7 +970,10 @@ func (s Service) Update(name string) ([]UpdateInfo, error) {
 		return updates, nil
 	}
 
-	lockPath := lockfile.Path(s.ProjectDir)
+	lockPath := s.lockPath()
+	if err := ensureParentDir(lockPath); err != nil {
+		return nil, fmt.Errorf("mkdir %s: %w", filepath.Dir(lockPath), err)
+	}
 	if err := lockfile.WriteFile(lockPath, *lf); err != nil {
 		return nil, fmt.Errorf("write %s: %w", lockPath, err)
 	}
@@ -872,16 +982,16 @@ func (s Service) Update(name string) ([]UpdateInfo, error) {
 }
 
 func (s Service) loadProjectState() (*manifest.Manifest, *lockfile.Lockfile, error) {
-	manifestPath := filepath.Join(s.ProjectDir, manifest.FileName)
+	manifestPath := s.manifestPath()
 	doc, err := manifest.ReadFile(manifestPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil, fmt.Errorf("%s not found; run `ski init` first", manifestPath)
+			return nil, nil, fmt.Errorf("%s not found; %s", manifestPath, s.initHint())
 		}
 		return nil, nil, fmt.Errorf("read %s: %w", manifestPath, err)
 	}
 
-	lockPath := lockfile.Path(s.ProjectDir)
+	lockPath := s.lockPath()
 	lf, err := readOrDefaultLockfile(lockPath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read %s: %w", lockPath, err)
@@ -895,9 +1005,9 @@ func selectSkills(doc *manifest.Manifest, name string) ([]manifest.Skill, error)
 		return doc.Skills, nil
 	}
 
-	skill, ok := findSkillByName(doc.Skills, name)
+	skill, ok := findSkill(doc.Skills, func(s manifest.Skill) bool { return s.Name == name })
 	if !ok {
-		return nil, fmt.Errorf("skill %q not found in %s", name, manifest.FileName)
+		return nil, fmt.Errorf("skill %q not found in manifest", name)
 	}
 	return []manifest.Skill{skill}, nil
 }
@@ -923,16 +1033,16 @@ type SkillInfo struct {
 
 // List returns the skills declared in ski.toml, enriched with lock data.
 func (s Service) List() ([]SkillInfo, error) {
-	manifestPath := filepath.Join(s.ProjectDir, manifest.FileName)
+	manifestPath := s.manifestPath()
 	doc, err := manifest.ReadFile(manifestPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, fmt.Errorf("%s not found; run `ski init` first", manifestPath)
+			return nil, fmt.Errorf("%s not found; %s", manifestPath, s.initHint())
 		}
 		return nil, fmt.Errorf("read %s: %w", manifestPath, err)
 	}
 
-	lockPath := lockfile.Path(s.ProjectDir)
+	lockPath := s.lockPath()
 	lf, err := readOrDefaultLockfile(lockPath)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", lockPath, err)

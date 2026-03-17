@@ -63,6 +63,31 @@ func TestLinkSupportsCustomRelativeTarget(t *testing.T) {
 	}
 }
 
+func TestLinkSupportsCustomTargetViaInScopeSymlink(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := filepath.Join(t.TempDir(), "my-skill")
+	if err := os.MkdirAll(filepath.Join(root, "managed"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.Symlink(filepath.Join(root, "managed"), filepath.Join(root, "linked")); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
+	}
+
+	if err := target.Link(root, "dir:linked/skills", "my-skill", store); err != nil {
+		t.Fatalf("Link() error = %v", err)
+	}
+
+	got, err := os.Readlink(filepath.Join(root, "managed", "skills", "my-skill"))
+	if err != nil {
+		t.Fatalf("Readlink() error = %v", err)
+	}
+	if got != store {
+		t.Fatalf("symlink target = %q, want %q", got, store)
+	}
+}
+
 // TestLinkIsIdempotent verifies that calling Link twice with the same arguments
 // succeeds without error.
 func TestLinkIsIdempotent(t *testing.T) {
@@ -183,6 +208,99 @@ func TestLinkRejectsBareRelativePathWithoutPrefix(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unsupported target") {
 		t.Fatalf("Link() error = %v, want unsupported target error", err)
+	}
+}
+
+func TestLinkRejectsCustomTargetWithSymlinkEscape(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(root, "linked")); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
+	}
+
+	err := target.Link(root, "dir:linked/skills", "my-skill", "/store")
+	if err == nil {
+		t.Fatal("Link() error = nil, want symlink traversal error")
+	}
+	if !strings.Contains(err.Error(), "escapes the managed scope via symlink traversal") {
+		t.Fatalf("Link() error = %v, want symlink traversal error", err)
+	}
+}
+
+func TestLinkGlobalCreatesHomeSymlink(t *testing.T) {
+	t.Parallel()
+
+	homeDir := t.TempDir()
+	store := filepath.Join(t.TempDir(), "my-skill")
+
+	if err := target.LinkGlobal(homeDir, "claude", "my-skill", store); err != nil {
+		t.Fatalf("LinkGlobal() error = %v", err)
+	}
+
+	got, err := os.Readlink(filepath.Join(homeDir, ".claude", "skills", "my-skill"))
+	if err != nil {
+		t.Fatalf("Readlink() error = %v", err)
+	}
+	if got != store {
+		t.Fatalf("symlink target = %q, want %q", got, store)
+	}
+}
+
+func TestLinkGlobalSupportsHomeRelativeCustomTarget(t *testing.T) {
+	t.Parallel()
+
+	homeDir := t.TempDir()
+	store := filepath.Join(t.TempDir(), "my-skill")
+
+	if err := target.LinkGlobal(homeDir, "dir:agent-skills/claude", "my-skill", store); err != nil {
+		t.Fatalf("LinkGlobal() error = %v", err)
+	}
+
+	got, err := os.Readlink(filepath.Join(homeDir, "agent-skills", "claude", "my-skill"))
+	if err != nil {
+		t.Fatalf("Readlink() error = %v", err)
+	}
+	if got != store {
+		t.Fatalf("symlink target = %q, want %q", got, store)
+	}
+}
+
+func TestLinkGlobalSupportsTildeExpansion(t *testing.T) {
+	t.Parallel()
+
+	homeDir := t.TempDir()
+	store := filepath.Join(t.TempDir(), "my-skill")
+
+	if err := target.LinkGlobal(homeDir, "dir:~/agent-skills/claude", "my-skill", store); err != nil {
+		t.Fatalf("LinkGlobal() error = %v", err)
+	}
+
+	got, err := os.Readlink(filepath.Join(homeDir, "agent-skills", "claude", "my-skill"))
+	if err != nil {
+		t.Fatalf("Readlink() error = %v", err)
+	}
+	if got != store {
+		t.Fatalf("symlink target = %q, want %q", got, store)
+	}
+}
+
+func TestLinkGlobalRejectsCustomTargetWithSymlinkEscape(t *testing.T) {
+	t.Parallel()
+
+	homeDir := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(homeDir, "linked")); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
+	}
+
+	err := target.LinkGlobal(homeDir, "dir:linked/skills", "my-skill", "/store")
+	if err == nil {
+		t.Fatal("LinkGlobal() error = nil, want symlink traversal error")
+	}
+	if !strings.Contains(err.Error(), "escapes the managed scope via symlink traversal") {
+		t.Fatalf("LinkGlobal() error = %v, want symlink traversal error", err)
 	}
 }
 

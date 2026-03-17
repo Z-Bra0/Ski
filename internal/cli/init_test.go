@@ -71,3 +71,31 @@ func TestInitFailsWhenManifestExists(t *testing.T) {
 		t.Fatalf("Execute() error = %v, want already exists", err)
 	}
 }
+
+func TestInitCreatesGlobalManifest(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	homeDir := t.TempDir()
+
+	cmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return dir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	cmd.SetArgs([]string{"init", "-g"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	path := manifest.GlobalPath(homeDir)
+	doc, err := manifest.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error = %v", path, err)
+	}
+	if got, want := *doc, manifest.Default(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("manifest = %#v, want %#v", got, want)
+	}
+}

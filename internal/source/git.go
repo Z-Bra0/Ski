@@ -131,6 +131,20 @@ func (g Git) pathForName() string {
 	return g.URL
 }
 
+func (g Git) IsRemote() bool {
+	if strings.Contains(g.URL, "://") {
+		return true
+	}
+	if hostSep := strings.Index(g.URL, ":"); hostSep >= 0 && !strings.Contains(g.URL[:hostSep], "/") {
+		return true
+	}
+	return false
+}
+
+func (g Git) IsLocalPath() bool {
+	return !g.IsRemote()
+}
+
 func ResolveGit(dir string, spec Git) (string, error) {
 	patterns := []string{"HEAD"}
 	if spec.Ref != "" {

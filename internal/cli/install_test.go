@@ -274,6 +274,103 @@ func TestInstallSupportsCustomTargetFolder(t *testing.T) {
 	}
 }
 
+func TestInstallGlobalRestoresHomeSymlink(t *testing.T) {
+	t.Parallel()
+
+	repoPath, commit := createGitRepo(t, "repo-map", "repo-map")
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	globalManifestPath := manifest.GlobalPath(homeDir)
+	if err := os.MkdirAll(filepath.Dir(globalManifestPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := manifest.WriteFile(globalManifestPath, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills:  []manifest.Skill{},
+	}); err != nil {
+		t.Fatalf("WriteFile(manifest) error = %v", err)
+	}
+
+	addCmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	addCmd.SetArgs([]string{"add", "-g", "git:" + repoPath + "@v1.0.0"})
+	if err := addCmd.Execute(); err != nil {
+		t.Fatalf("add Execute() error = %v", err)
+	}
+
+	linkPath := filepath.Join(homeDir, ".claude", "skills", "repo-map")
+	if err := os.Remove(linkPath); err != nil {
+		t.Fatalf("Remove(symlink) error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	installCmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &stdout,
+		Stderr:     &bytes.Buffer{},
+	})
+	installCmd.SetArgs([]string{"install", "-g"})
+	if err := installCmd.Execute(); err != nil {
+		t.Fatalf("install Execute() error = %v", err)
+	}
+
+	targetPath, err := os.Readlink(linkPath)
+	if err != nil {
+		t.Fatalf("Readlink() error = %v", err)
+	}
+	wantStore := filepath.Join(homeDir, ".ski", "store", "git", "repo-map", commit)
+	if targetPath != wantStore {
+		t.Fatalf("symlink target = %q, want %q", targetPath, wantStore)
+	}
+	if got := stdout.String(); !strings.Contains(got, "installed 1 skills") {
+		t.Fatalf("stdout = %q, want installed confirmation", got)
+	}
+}
+
+func TestInstallGlobalRejectsRelativeLocalSourceInManifest(t *testing.T) {
+	t.Parallel()
+
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	globalManifestPath := manifest.GlobalPath(homeDir)
+	if err := os.MkdirAll(filepath.Dir(globalManifestPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := manifest.WriteFile(globalManifestPath, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills: []manifest.Skill{
+			{Name: "repo-map", Source: "git:../repo-map"},
+		},
+	}); err != nil {
+		t.Fatalf("WriteFile(manifest) error = %v", err)
+	}
+
+	cmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	cmd.SetArgs([]string{"install", "-g"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want relative-source error")
+	}
+	if !strings.Contains(err.Error(), `relative local git source "../repo-map" is not allowed in global scope`) {
+		t.Fatalf("Execute() error = %v, want relative-source error", err)
+	}
+}
+
 func TestInstallSupportsAliasName(t *testing.T) {
 	t.Parallel()
 
@@ -338,8 +435,8 @@ func TestInstallRestoresMultiSkillSelectors(t *testing.T) {
 		Version: 1,
 		Targets: []string{"claude"},
 		Skills: []manifest.Skill{
-				{Name: "alpha-skill", Source: "git:" + repoPath + "##alpha-skill"},
-				{Name: "beta-skill", Source: "git:" + repoPath + "##beta-skill"},
+			{Name: "alpha-skill", Source: "git:" + repoPath + "##alpha-skill"},
+			{Name: "beta-skill", Source: "git:" + repoPath + "##beta-skill"},
 		},
 	}); err != nil {
 		t.Fatalf("WriteFile(manifest) error = %v", err)

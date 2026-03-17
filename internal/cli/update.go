@@ -4,8 +4,6 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-
-	"ski/internal/app"
 )
 
 func newUpdateCmd(opts Options) *cobra.Command {
@@ -13,16 +11,12 @@ func newUpdateCmd(opts Options) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "update [skill]",
-		Short: "Update skills to newer upstream revisions",
+		Short: "Update skills in the active scope to newer upstream revisions",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cwd, err := opts.Getwd()
+			svc, err := newService(cmd, opts)
 			if err != nil {
-				return fmt.Errorf("resolve working directory: %w", err)
-			}
-			homeDir, err := opts.GetHomeDir()
-			if err != nil {
-				return fmt.Errorf("resolve home directory: %w", err)
+				return err
 			}
 
 			name := ""
@@ -30,7 +24,6 @@ func newUpdateCmd(opts Options) *cobra.Command {
 				name = args[0]
 			}
 
-			svc := app.Service{ProjectDir: cwd, HomeDir: homeDir}
 			if check {
 				updates, err := svc.CheckUpdates(name)
 				if err != nil {

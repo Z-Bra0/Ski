@@ -4,26 +4,18 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-
-	"ski/internal/app"
 )
 
 func newInstallCmd(opts Options) *cobra.Command {
 	return &cobra.Command{
 		Use:   "install",
-		Short: "Install skills from ski.toml and ski.lock.json",
+		Short: "Install skills from the active manifest and lockfile",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cwd, err := opts.Getwd()
+			svc, err := newService(cmd, opts)
 			if err != nil {
-				return fmt.Errorf("resolve working directory: %w", err)
+				return err
 			}
-			homeDir, err := opts.GetHomeDir()
-			if err != nil {
-				return fmt.Errorf("resolve home directory: %w", err)
-			}
-
-			svc := app.Service{ProjectDir: cwd, HomeDir: homeDir}
 			count, err := svc.Install()
 			if err != nil {
 				return err

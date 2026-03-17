@@ -31,7 +31,7 @@ If a repo contains multiple skills, `ski add` prompts in a terminal. In non-inte
 
 If the repo URL or local path contains a literal `@`, `#`, or `\`, escape it in the source string as `\@`, `\#`, or `\\`. Example: `git:/tmp/skill\#\#pack`.
 
-`targets = ["claude"]` in `ski.toml` means project-local installation into `./.claude/skills/`. v1 does not write to `~/.claude/skills/` or other global agent directories.
+`targets = ["claude"]` in `ski.toml` means project-local installation into `./.claude/skills/`. Use `-g` to operate on `~/.ski/global.toml` / `~/.ski/global.lock.json` and link built-in targets into user-global agent directories such as `~/.claude/skills/`.
 
 Custom project-local target folders are also supported with a `dir:` prefix. Example: `targets = ["claude", "dir:./agent-skills/claude"]`.
 

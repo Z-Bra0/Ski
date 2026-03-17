@@ -33,24 +33,21 @@ func TestAddSelectedRollsBackAfterLinkFailure(t *testing.T) {
 		t.Fatalf("WriteFile(manifest) error = %v", err)
 	}
 
-	origLinkAll := linkAll
-	origUnlinkAll := unlinkAll
-	t.Cleanup(func() {
-		linkAll = origLinkAll
-		unlinkAll = origUnlinkAll
-	})
-
 	callCount := 0
-	linkAll = func(projectRoot string, targets []string, name, storePath string) error {
-		callCount++
-		if callCount == 2 {
-			return fmt.Errorf("forced link failure for %s", name)
-		}
-		return target.LinkAll(projectRoot, targets, name, storePath)
+	svc := Service{
+		ProjectDir: projectDir,
+		HomeDir:    homeDir,
+		linkAllFn: func(targets []string, name, storePath string) error {
+			callCount++
+			if callCount == 2 {
+				return fmt.Errorf("forced link failure for %s", name)
+			}
+			return target.LinkAll(projectDir, targets, name, storePath)
+		},
+		unlinkAllFn: func(targets []string, name string) error {
+			return target.UnlinkAll(projectDir, targets, name)
+		},
 	}
-	unlinkAll = target.UnlinkAll
-
-	svc := Service{ProjectDir: projectDir, HomeDir: homeDir}
 	_, err := svc.AddSelected("git:"+repoPath, []string{"alpha-skill", "beta-skill"}, "")
 	if err == nil {
 		t.Fatal("AddSelected() error = nil, want forced link failure")

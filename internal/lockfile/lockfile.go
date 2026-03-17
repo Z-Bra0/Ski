@@ -9,6 +9,7 @@ import (
 
 const (
 	FileName       = "ski.lock.json"
+	GlobalFileName = "global.lock.json"
 	CurrentVersion = 1
 )
 
@@ -92,4 +93,8 @@ func (lf Lockfile) Validate() error {
 
 func Path(dir string) string {
 	return filepath.Join(dir, FileName)
+}
+
+func GlobalPath(homeDir string) string {
+	return filepath.Join(homeDir, ".ski", GlobalFileName)
 }

@@ -283,6 +283,68 @@ func TestRemoveDeletesCustomTargetSymlink(t *testing.T) {
 	}
 }
 
+func TestRemoveGlobalDeletesHomeSymlinkAndMetadata(t *testing.T) {
+	t.Parallel()
+
+	repoPath, _ := createGitRepo(t, "repo-map", "repo-map")
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	globalManifestPath := manifest.GlobalPath(homeDir)
+	if err := os.MkdirAll(filepath.Dir(globalManifestPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := manifest.WriteFile(globalManifestPath, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills:  []manifest.Skill{},
+	}); err != nil {
+		t.Fatalf("WriteFile(manifest) error = %v", err)
+	}
+
+	addCmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	addCmd.SetArgs([]string{"add", "-g", "git:" + repoPath})
+	if err := addCmd.Execute(); err != nil {
+		t.Fatalf("add Execute() error = %v", err)
+	}
+
+	removeCmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	removeCmd.SetArgs([]string{"remove", "-g", "repo-map"})
+	if err := removeCmd.Execute(); err != nil {
+		t.Fatalf("remove Execute() error = %v", err)
+	}
+
+	if _, err := os.Lstat(filepath.Join(homeDir, ".claude", "skills", "repo-map")); !os.IsNotExist(err) {
+		t.Fatalf("global claude symlink still exists after remove")
+	}
+
+	doc, err := manifest.ReadFile(globalManifestPath)
+	if err != nil {
+		t.Fatalf("ReadFile(manifest) error = %v", err)
+	}
+	if len(doc.Skills) != 0 {
+		t.Fatalf("manifest skills = %v, want empty", doc.Skills)
+	}
+
+	lf, err := lockfile.ReadFile(lockfile.GlobalPath(homeDir))
+	if err != nil {
+		t.Fatalf("ReadFile(lockfile) error = %v", err)
+	}
+	if len(lf.Skills) != 0 {
+		t.Fatalf("lockfile skills = %v, want empty", lf.Skills)
+	}
+}
+
 func TestRemoveFailsWithoutManifest(t *testing.T) {
 	t.Parallel()
 

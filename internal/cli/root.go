@@ -55,6 +55,7 @@ func NewRootCmd(opts Options) *cobra.Command {
 	cmd.SetIn(opts.Stdin)
 	cmd.SetOut(opts.Stdout)
 	cmd.SetErr(opts.Stderr)
+	cmd.PersistentFlags().BoolP("global", "g", false, "Use the global manifest and global target scope")
 
 	cmd.AddCommand(newAddCmd(opts))
 	cmd.AddCommand(newDoctorCmd(opts))

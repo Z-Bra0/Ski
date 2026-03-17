@@ -11,6 +11,7 @@ import (
 
 const (
 	FileName       = "ski.toml"
+	GlobalFileName = "global.toml"
 	CurrentVersion = 1
 )
 
@@ -104,6 +105,10 @@ func (doc Manifest) Validate() error {
 
 func Path(dir string) string {
 	return filepath.Join(dir, FileName)
+}
+
+func GlobalPath(homeDir string) string {
+	return filepath.Join(homeDir, ".ski", GlobalFileName)
 }
 
 func normalize(doc *Manifest) {

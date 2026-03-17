@@ -4,26 +4,18 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-
-	"ski/internal/app"
 )
 
 func newDoctorCmd(opts Options) *cobra.Command {
 	return &cobra.Command{
 		Use:   "doctor",
-		Short: "Check for broken links and manifest/lockfile inconsistencies",
+		Short: "Check for broken links and inconsistencies in the active scope",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cwd, err := opts.Getwd()
+			svc, err := newService(cmd, opts)
 			if err != nil {
-				return fmt.Errorf("resolve working directory: %w", err)
+				return err
 			}
-			homeDir, err := opts.GetHomeDir()
-			if err != nil {
-				return fmt.Errorf("resolve home directory: %w", err)
-			}
-
-			svc := app.Service{ProjectDir: cwd, HomeDir: homeDir}
 			findings, err := svc.Doctor()
 			if err != nil {
 				return err

@@ -246,6 +246,109 @@ func TestAddLinksIntoCustomTargetFolder(t *testing.T) {
 	}
 }
 
+func TestAddGlobalWritesGlobalStateAndLinksToHome(t *testing.T) {
+	t.Parallel()
+
+	repoPath, commit := createGitRepo(t, "repo-map", "repo-map")
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	globalManifestPath := manifest.GlobalPath(homeDir)
+	if err := os.MkdirAll(filepath.Dir(globalManifestPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := manifest.WriteFile(globalManifestPath, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills:  []manifest.Skill{},
+	}); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	cmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	cmd.SetArgs([]string{"add", "-g", "git:" + repoPath})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	doc, err := manifest.ReadFile(globalManifestPath)
+	if err != nil {
+		t.Fatalf("ReadFile(manifest) error = %v", err)
+	}
+	if len(doc.Skills) != 1 || doc.Skills[0].Name != "repo-map" {
+		t.Fatalf("manifest skills = %#v, want global repo-map entry", doc.Skills)
+	}
+
+	lf, err := lockfile.ReadFile(lockfile.GlobalPath(homeDir))
+	if err != nil {
+		t.Fatalf("ReadFile(lockfile) error = %v", err)
+	}
+	if len(lf.Skills) != 1 || lf.Skills[0].Commit != commit {
+		t.Fatalf("lockfile skills = %#v, want one entry with commit %q", lf.Skills, commit)
+	}
+
+	linkPath := filepath.Join(homeDir, ".claude", "skills", "repo-map")
+	targetPath, err := os.Readlink(linkPath)
+	if err != nil {
+		t.Fatalf("Readlink() error = %v", err)
+	}
+	wantStore := filepath.Join(homeDir, ".ski", "store", "git", "repo-map", commit)
+	if targetPath != wantStore {
+		t.Fatalf("symlink target = %q, want %q", targetPath, wantStore)
+	}
+}
+
+func TestAddGlobalCanonicalizesRelativeLocalSource(t *testing.T) {
+	t.Parallel()
+
+	repoPath, _ := createGitRepo(t, "repo-map", "repo-map")
+	projectDir := filepath.Join(filepath.Dir(repoPath), "work")
+	homeDir := t.TempDir()
+
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+
+	globalManifestPath := manifest.GlobalPath(homeDir)
+	if err := os.MkdirAll(filepath.Dir(globalManifestPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := manifest.WriteFile(globalManifestPath, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills:  []manifest.Skill{},
+	}); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	cmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	cmd.SetArgs([]string{"add", "-g", "git:../repo-map"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	doc, err := manifest.ReadFile(globalManifestPath)
+	if err != nil {
+		t.Fatalf("ReadFile(manifest) error = %v", err)
+	}
+	wantSource := source.Git{URL: repoPath, Skills: []string{"repo-map"}}.String()
+	if len(doc.Skills) != 1 || doc.Skills[0].Source != wantSource {
+		t.Fatalf("skills = %#v, want source %q", doc.Skills, wantSource)
+	}
+}
+
 func TestAddFailsWithoutManifest(t *testing.T) {
 	t.Parallel()
 

@@ -18,40 +18,34 @@ func newAddCmd(opts Options) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "add <source>",
-		Short: "Add a git skill source to ski.toml",
+		Short: "Add a git skill source to the active manifest",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cwd, err := opts.Getwd()
+			svc, err := newService(cmd, opts)
 			if err != nil {
-				return fmt.Errorf("resolve working directory: %w", err)
+				return err
 			}
-			homeDir, err := opts.GetHomeDir()
-			if err != nil {
-				return fmt.Errorf("resolve home directory: %w", err)
-			}
-
-			svc := app.Service{ProjectDir: cwd, HomeDir: homeDir}
 			src, err := source.ParseGit(args[0])
 			if err != nil {
 				return err
 			}
 
-				if len(src.Skills) > 0 && addAll {
-					return fmt.Errorf("--all cannot be used with explicit skill selectors")
-				}
+			if len(src.Skills) > 0 && addAll {
+				return fmt.Errorf("--all cannot be used with explicit skill selectors")
+			}
 
-				selected := append([]string(nil), src.Skills...)
-				added, err := svc.AddSelected(args[0], selected, name)
+			selected := append([]string(nil), src.Skills...)
+			added, err := svc.AddSelected(args[0], selected, name)
 			if err != nil {
 				var multiErr app.MultiSkillSelectionError
 				if !errors.As(err, &multiErr) {
 					return err
 				}
 
-					selected, err = resolveAddSelection(cmd, opts, src.Skills, multiErr.Skills, addAll)
-					if err != nil {
-						return err
-					}
+				selected, err = resolveAddSelection(cmd, opts, src.Skills, multiErr.Skills, addAll)
+				if err != nil {
+					return err
+				}
 				added, err = svc.AddSelected(args[0], selected, name)
 				if err != nil {
 					return err
@@ -59,10 +53,10 @@ func newAddCmd(opts Options) *cobra.Command {
 			}
 
 			if len(added) == 1 {
-				fmt.Fprintf(cmd.OutOrStdout(), "added %s to ski.toml\n", added[0])
+				fmt.Fprintf(cmd.OutOrStdout(), "added %s to %s\n", added[0], manifestDisplayName(svc))
 				return nil
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "added %d skills to ski.toml: %s\n", len(added), strings.Join(added, ", "))
+			fmt.Fprintf(cmd.OutOrStdout(), "added %d skills to %s: %s\n", len(added), manifestDisplayName(svc), strings.Join(added, ", "))
 			return nil
 		},
 	}
