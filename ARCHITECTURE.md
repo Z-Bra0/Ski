@@ -13,10 +13,9 @@ Application Core
 │
 ├── Source Adapters      (fetch skills from git in the MVP)
 ├── Skill Store          (~/.ski/store — central on-disk cache)
-├── Lockfile Manager     (read/write ski.lock.json)
+├── Manifest/Lockfile    (read/write local and global state)
 ├── Target Adapters      (link skills into .claude/skills, .codex/skills, etc.)
-├── Security Scanner     (rule-based + external scanners)
-└── Doctor / Maintenance (symlink checks, prune, consistency validation)
+└── Doctor / Maintenance (symlink checks, consistency validation)
 ```
 
 ---
@@ -38,21 +37,24 @@ ski/
   cmd/ski/              # entry point
 
   internal/
+    app/                # orchestration for local/global operations
     cli/                # one file per command
     manifest/           # ski.toml parse/write
     lockfile/           # ski.lock.json read/write
     store/              # central store: fetch, cache, gc
     source/             # source adapters (git/ in the MVP)
     target/             # target adapters (claude/, codex/, cursor/, openclaw/)
-    scanner/            # security scanners (rules/, external/)
 ```
 
 ---
 
 ## Future Extensions
 
+- packaged release/install story
 - dependency resolution between skills
 - content-addressed store (hash-based dedup)
+- prune command for unused store entries
+- scanner module and security scanning workflow
 - skill signing and verification
 - capability sandboxing
 - auto-detect agent platforms (v2)

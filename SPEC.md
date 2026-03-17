@@ -76,6 +76,8 @@ For multi-skill repositories, the stored commit directory is the full repository
 
 Project-local manifest. Committed with the repository.
 
+`ski init` creates this file with `version = 1` and `targets = []`. Users set `targets` explicitly after initialization.
+
 ```toml
 version = 1
 targets = ["claude", "dir:./agent-skills/claude"]  # default targets for all skills
@@ -132,6 +134,12 @@ Commands without `-g` operate on local scope.
 
 Commands with `-g` / `--global` operate only on global scope. Local and global manifests/lockfiles are fully separate.
 
+For local git repositories:
+
+- local scope resolves relative `git:` paths against the project root
+- `ski add -g` canonicalizes relative local git paths to absolute paths before writing `~/.ski/global.toml`
+- hand-edited global manifests should use absolute local git paths, not relative ones
+
 ---
 
 ## Integrity
@@ -150,6 +158,15 @@ For single-skill repositories, this is equivalent to hashing the skill contents.
 
 ## Command Behavior
 
+### `ski init`
+
+Creates the active-scope manifest if it does not already exist:
+
+- local: `<project>/ski.toml`
+- global: `~/.ski/global.toml`
+
+The initial manifest contains `version = 1` and `targets = []`.
+
 ### `ski add <source>`
 
 Validates a `git:` source, discovers `SKILL.md` files recursively up to depth 3, and writes one manifest entry per selected skill.
@@ -165,11 +182,21 @@ If the source omits `##...` and the repository contains multiple skills:
 
 `ski add --all` adds every discovered skill in the repository.
 
-`ski add` writes canonical per-skill sources to `ski.toml`, for example `git:<url>##repo-map`, fetches into `~/.ski/store/`, links to project-local targets, and writes `ski.lock.json`. Same as `npm install <pkg>`.
+`ski add` writes canonical per-skill sources to the active manifest, for example `git:<url>##repo-map`, fetches into `~/.ski/store/`, links to the active-scope targets, and writes the active lockfile. Same as `npm install <pkg>`.
 
 ### `ski install`
 
-Reads `ski.toml` + `ski.lock.json`. Fetches any missing skills into the store by commit SHA. Verifies integrity. Links to project-local targets.
+Reads the active manifest and lockfile. Fetches any missing skills into the store by commit SHA. Verifies integrity. Links to the active-scope targets.
+
+If the active lockfile does not exist yet, `ski install` resolves the manifest entries, creates the lockfile, and links the resulting skills.
+
+### `ski list`
+
+Lists the skills declared in the active scope, including source, locked commit, and effective targets.
+
+### `ski doctor`
+
+Checks the active scope for broken symlinks and inconsistencies between the manifest, lockfile, store, and target directories.
 
 ### `ski update`
 
@@ -181,19 +208,20 @@ No args: updates all skills to latest commit, rewrites lockfile.
 
 ### `ski remove <skill>`
 
-Removes from `ski.toml`, removes from `ski.lock.json`, unlinks from all targets. Does not delete from store (use `ski prune` for that).
+Removes from the active manifest, removes from the active lockfile, and unlinks from all active-scope targets.
+
+Store contents are left in `~/.ski/store/`.
 
 ---
 
-## Source Adapter Interface
+## Source Adapter Responsibilities
 
-```go
-type SourceAdapter interface {
-    Search(ctx context.Context, query string) ([]SkillResult, error)
-    Resolve(ctx context.Context, ref string) (commit string, err error)
-    Fetch(ctx context.Context, commit string, dest string) error
-}
-```
+Source adapters are responsible for:
+
+- parsing and normalizing source refs
+- resolving a ref to a concrete commit
+- fetching the resolved repository snapshot into the store
+- discovering valid skills within that snapshot
 
 Registered in MVP: `git`.
 
@@ -201,16 +229,7 @@ Planned later: `github` as a convenience alias over Git-hosted repositories.
 
 ---
 
-## Target Adapter Interface
-
-```go
-type TargetAdapter interface {
-    SkillDir() string
-    Link(name string, storePath string) error
-    Unlink(name string) error
-    List() ([]string, error)
-}
-```
+## Target Adapter Responsibilities
 
 Targets are scope-dependent. In local scope, `targets = ["claude"]` means `./.claude/skills/` relative to the repo root that contains `ski.toml`.
 

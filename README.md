@@ -2,18 +2,31 @@
 
 A package manager for AI agent skills.
 
-Install skills from Git repositories into any agent platform — Claude, Codex, Cursor, and more — with a single manifest and lockfile.
+Install skills from Git repositories into agent platforms such as Claude, Codex, Cursor, and OpenClaw with a manifest, lockfile, and shared store.
 
 ---
 
-## Install
+## Status
 
 ```bash
-brew install ski
+Implemented in v1:
+- git: sources
+- local and global scope
+- init, add, install, remove, update, list, doctor
 ```
 
+Deferred:
+- github: shorthand
+- info, search, scan, prune
+- registry-style sources
+
+---
+
+## Build
+
 ```bash
-curl -fsSL https://ski.sh/install | sh
+go build ./cmd/ski
+go run ./cmd/ski -- help
 ```
 
 ---
@@ -22,9 +35,13 @@ curl -fsSL https://ski.sh/install | sh
 
 ```bash
 ski init                         # create ski.toml
+# edit ski.toml and set targets = ["claude"]
 ski add git:https://github.com/org/repo-map.git
-ski install                      # restore from ski.toml + ski.lock.json
 ski list                         # show installed skills
+ski doctor                       # verify links and lock state
+
+# another machine or fresh clone:
+ski install                      # restore from ski.toml + ski.lock.json
 ```
 
 If a repo contains multiple skills, `ski add` prompts in a terminal. In non-interactive mode, use `git:<url>##skill-a,skill-b` or `ski add <source> --all`.
@@ -33,40 +50,23 @@ If the repo URL or local path contains a literal `@`, `#`, or `\`, escape it in 
 
 `targets = ["claude"]` in `ski.toml` means project-local installation into `./.claude/skills/`. Use `-g` to operate on `~/.ski/global.toml` / `~/.ski/global.lock.json` and link built-in targets into user-global agent directories such as `~/.claude/skills/`.
 
-Custom project-local target folders are also supported with a `dir:` prefix. Example: `targets = ["claude", "dir:./agent-skills/claude"]`.
+Custom target folders use a `dir:` prefix. In local scope, `dir:./agent-skills/claude` resolves relative to the repo root. In global scope, `dir:agent-skills/claude` resolves relative to the user home directory, and `~` expansion is allowed.
 
 ---
 
 ## Commands
 
 ```bash
-ski init                   # create ski.toml
-ski add <source>           # add + fetch + link (like npm install <pkg>)
-ski install                # restore from manifest + lockfile
-ski remove <skill>         # remove skill
-ski update [skill]         # update all or one skill to latest
-ski update --check         # dry run — report outdated without changing
-ski list                   # list installed skills
-ski info <skill>           # show skill details
-ski search <query>         # search across sources
-ski scan [--all]           # security scan
-ski doctor                 # check for broken links / inconsistencies
-ski prune                  # remove unused skills from store
-```
-
----
-
-## Development
-
-```bash
-# Run all tests
-go test ./...
-
-# Run the CLI locally
-go run ./cmd/ski -- help
-
-# Build the binary
-go build ./cmd/ski
+ski init [-g]                    # create the local or global manifest
+ski add [-g] <source>            # add + fetch + link
+ski add [-g] <source> --all      # add all discovered skills from one repo
+ski add [-g] <source> --name x   # alias one selected skill locally
+ski install [-g]                 # restore from manifest + lockfile
+ski remove [-g] <skill>          # remove one skill from the active scope
+ski update [-g] [skill]          # update all skills or one skill
+ski update [-g] --check [skill]  # report available updates only
+ski list [-g]                    # list declared skills
+ski doctor [-g]                  # check links and lock/store consistency
 ```
 
 ---
@@ -75,5 +75,6 @@ go build ./cmd/ski
 
 - [SPEC.md](SPEC.md) — file formats, schemas, adapter interfaces
 - [ARCHITECTURE.md](ARCHITECTURE.md) — internal design and Go layout
+- [DECISIONS.md](DECISIONS.md) — design decisions and rationale
 
 MVP source support is `git:` only. `github:` may be added later as a convenience alias over Git-hosted repositories.

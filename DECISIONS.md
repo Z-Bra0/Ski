@@ -3,12 +3,13 @@
 Key design decisions and their rationale.
 
 - TOML for manifest, JSON for lockfile — TOML is readable for hand-editing (ski.toml); JSON is easy to generate and diff (ski.lock.json)
-- Project-scoped only, no global install — keeps behavior predictable; global state causes team sync issues
+- Separate local and global scope — repo state stays reproducible in `ski.toml` / `ski.lock.json`, while personal installs live in `~/.ski/global.toml` / `~/.ski/global.lock.json`
 - Version is informational — avoids multi-version store complexity; one copy per skill, version only used for update checks
 - `@ref` syntax for pinning — `git:<url>@v1.0.0` or `@commitSHA`; keeps refs explicit while staying close to familiar package-manager conventions
 - `ski add` = write + fetch + link — same as `npm install <pkg>`; no separate install step needed after add
 - Manifest skill names default from discovered `SKILL.md` metadata — keeps local names aligned with the upstream skill contract; `--name` remains available as a project-local alias for single-skill adds
 - SHA-256 for integrity — full directory hash, sorted walk; MD5 too weak for integrity checks
+- `dir:` prefix for custom target folders — built-in target names stay unambiguous, while custom destinations are explicit and scope-aware
 - `github` deferred — it is mostly UX sugar over Git-hosted repositories; implement `git` first for the MVP
 - `skillhub`/`clawhub` adapters deferred — API formats unknown; they are outside the MVP
 - Windows/symlink support deferred — needs research; macOS/Linux only for v1
