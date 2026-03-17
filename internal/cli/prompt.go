@@ -15,6 +15,14 @@ type MultiSelectRequest struct {
 	MinSelected int
 }
 
+// TextPromptRequest describes a CLI text input prompt.
+type TextPromptRequest struct {
+	Title       string
+	Description string
+	Placeholder string
+	Value       string
+}
+
 func runMultiSelectPrompt(opts Options, req MultiSelectRequest) ([]string, error) {
 	if opts.PromptMultiSelect != nil {
 		return opts.PromptMultiSelect(req)
@@ -52,6 +60,34 @@ func runHuhMultiSelectPrompt(input io.Reader, output io.Writer, req MultiSelectR
 		return nil, err
 	}
 	return normalizeSelections(selected, req.Options), nil
+}
+
+func runTextPrompt(opts Options, req TextPromptRequest) (string, error) {
+	if opts.PromptInput != nil {
+		return opts.PromptInput(req)
+	}
+	return runHuhTextPrompt(opts.Stdin, opts.Stdout, req)
+}
+
+func runHuhTextPrompt(input io.Reader, output io.Writer, req TextPromptRequest) (string, error) {
+	value := req.Value
+	field := huh.NewInput().
+		Title(req.Title).
+		Value(&value)
+	if req.Description != "" {
+		field = field.Description(req.Description)
+	}
+	if req.Placeholder != "" {
+		field = field.Placeholder(req.Placeholder)
+	}
+
+	form := huh.NewForm(huh.NewGroup(field)).
+		WithInput(input).
+		WithOutput(output)
+	if err := form.Run(); err != nil {
+		return "", err
+	}
+	return value, nil
 }
 
 func normalizeSelections(selected, options []string) []string {

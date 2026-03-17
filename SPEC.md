@@ -78,7 +78,7 @@ For multi-skill repositories, the stored commit directory is the full repository
 
 Project-local manifest. Committed with the repository.
 
-`ski init` creates this file with `version = 1` and `targets = []`. Users set `targets` explicitly after initialization.
+`ski init` creates this file with `version = 1`. If no targets are selected or passed, it starts with `targets = []`.
 
 ```toml
 version = 1
@@ -172,7 +172,14 @@ Creates the active-scope manifest if it does not already exist:
 - local: `<project>/ski.toml`
 - global: `~/.ski/global.toml`
 
-The initial manifest contains `version = 1` and `targets = []`.
+If `--target` flags are provided, `ski init` writes them into the new manifest.
+
+If no `--target` flags are provided and `ski init` is running on a TTY, it prompts for:
+
+- built-in targets such as `claude` and `codex`
+- optional custom target directories, written as `dir:<path>`
+
+If no targets are selected, the initial manifest contains `version = 1` and `targets = []`.
 
 ### `ski add <source>`
 

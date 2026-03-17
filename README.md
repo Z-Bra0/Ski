@@ -34,8 +34,7 @@ go run ./cmd/ski -- help
 ## Quick Start
 
 ```bash
-ski init                         # create ski.toml
-# edit ski.toml and set targets = ["claude"]
+ski init                         # create ski.toml and pick targets on a TTY
 ski add https://github.com/org/repo-map.git
 ski list                         # show installed skills
 ski doctor                       # verify links and lock state
@@ -56,12 +55,15 @@ URL-form git sources may omit the `git:` prefix, including `https://...`, `ssh:/
 
 Custom target folders use a `dir:` prefix. In local scope, `dir:./agent-skills/claude` resolves relative to the repo root. In global scope, `dir:agent-skills/claude` resolves relative to the user home directory, and `~` expansion is allowed.
 
+On a TTY, `ski init` now prompts for built-in targets and optional custom target directories. In scripts or non-interactive environments, use `ski init --target claude --target dir:./agent-skills/claude`.
+
 ---
 
 ## Commands
 
 ```bash
 ski init [-g]                    # create the local or global manifest
+ski init [-g] --target x         # set initial targets without prompting
 ski add [-g] <source>            # add + fetch + link
 ski add [-g] <source> --skill x  # add selected upstream skill(s) from one repo
 ski add [-g] <source> --all      # add all discovered skills from one repo

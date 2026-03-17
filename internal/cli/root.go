@@ -16,6 +16,7 @@ type Options struct {
 	Stderr            io.Writer
 	IsTTY             func() bool
 	PromptMultiSelect func(req MultiSelectRequest) ([]string, error)
+	PromptInput       func(req TextPromptRequest) (string, error)
 }
 
 // NewRootCmd constructs the ski CLI with all implemented subcommands.
