@@ -24,11 +24,10 @@ type Git struct {
 
 func ParseGit(raw string) (Git, error) {
 	raw = strings.TrimSpace(raw)
-	if !strings.HasPrefix(raw, gitPrefix) {
-		return Git{}, fmt.Errorf("unsupported source %q: expected git:<url>[@ref][##skill[,skill...]]", raw)
+	spec, ok := normalizeGitInput(raw)
+	if !ok {
+		return Git{}, fmt.Errorf("unsupported source %q: expected git:<url>[@ref][##skill[,skill...]] or a bare remote URL", raw)
 	}
-
-	spec := strings.TrimSpace(strings.TrimPrefix(raw, gitPrefix))
 	if spec == "" {
 		return Git{}, fmt.Errorf("invalid git source %q: missing url", raw)
 	}
@@ -58,6 +57,26 @@ func ParseGit(raw string) (Git, error) {
 	}
 
 	return Git{URL: gitURL, Ref: ref, Skills: skills}, nil
+}
+
+func normalizeGitInput(raw string) (string, bool) {
+	switch {
+	case strings.HasPrefix(raw, gitPrefix):
+		return strings.TrimSpace(strings.TrimPrefix(raw, gitPrefix)), true
+	case isBareRemoteGitURL(raw):
+		return raw, true
+	default:
+		return "", false
+	}
+}
+
+func isBareRemoteGitURL(raw string) bool {
+	for _, prefix := range []string{"https://", "http://", "ssh://", "git://", "file://"} {
+		if strings.HasPrefix(raw, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func (g Git) String() string {

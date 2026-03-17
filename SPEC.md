@@ -28,15 +28,17 @@ Reference spec: <https://agentskills.io/specification>
 
 ## Source Specifiers
 
-MVP format: `git:<url>` with optional `@<tag-or-commit>` and optional `##<skill-name>[,<skill-name>...]`.
+MVP accepts canonical `git:<url>` sources plus bare URL-form git sources such as `https://...`, `ssh://...`, `git://...`, and `file://...`, with optional `@<tag-or-commit>` and optional `##<skill-name>[,<skill-name>...]`.
 
 | Adapter | Format | Example |
 |---------|--------|---------|
-| `git` | `git:<url>[@ref][##skill[,skill...]]` | `git:https://github.com/org/skill-pack.git@a1b2c3d##repo-map,audit-skill` |
+| `git` | `git:<url>[@ref][##skill[,skill...]]` or bare URL-form git source | `https://github.com/org/skill-pack.git@a1b2c3d##repo-map,audit-skill` |
 
 `@ref` is optional. When omitted, resolves to default branch HEAD. `ref` can be a tag or a commit SHA.
 
 `##skill[,skill...]` is optional and selects discovered skills by their `name` in `SKILL.md`.
+
+Bare URL-form git sources are normalized back to canonical `git:` strings when `ski.toml` and `ski.lock.json` are written. Plain local filesystem paths still require the `git:` prefix.
 
 Literal `@`, `#`, or `\` characters in the URL or ref must be escaped as `\@`, `\#`, and `\\`. For example, a local repo at `/tmp/skill##pack` is written as ``git:/tmp/skill\#\#pack``.
 

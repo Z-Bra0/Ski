@@ -42,7 +42,7 @@ func newAddCmd(opts Options) *cobra.Command {
 					return err
 				}
 
-				selected, err = resolveAddSelection(cmd, opts, src.Skills, multiErr.Skills, addAll)
+				selected, err = resolveAddSelection(cmd, opts, args[0], src.Skills, multiErr.Skills, addAll)
 				if err != nil {
 					return err
 				}
@@ -66,7 +66,7 @@ func newAddCmd(opts Options) *cobra.Command {
 	return cmd
 }
 
-func resolveAddSelection(cmd *cobra.Command, opts Options, explicit, discovered []string, addAll bool) ([]string, error) {
+func resolveAddSelection(cmd *cobra.Command, opts Options, rawSource string, explicit, discovered []string, addAll bool) ([]string, error) {
 	if len(explicit) > 0 {
 		return explicit, nil
 	}
@@ -76,7 +76,7 @@ func resolveAddSelection(cmd *cobra.Command, opts Options, explicit, discovered 
 	}
 
 	if !opts.IsTTY() {
-		return nil, fmt.Errorf("multiple skills found; rerun with git:<url>##%s or --all", strings.Join(discovered, ","))
+		return nil, fmt.Errorf("multiple skills found; rerun with %s##%s or --all", strings.TrimSpace(rawSource), strings.Join(discovered, ","))
 	}
 
 	return promptForSkills(cmd, discovered)

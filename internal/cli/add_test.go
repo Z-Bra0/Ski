@@ -198,6 +198,45 @@ func TestAddSupportsEscapedRepoPathContainingDoubleHash(t *testing.T) {
 	}
 }
 
+func TestAddSupportsBareRemoteFileURL(t *testing.T) {
+	t.Parallel()
+
+	repoPath, _ := createGitRepo(t, "repo-map", "repo-map")
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	path := filepath.Join(projectDir, manifest.FileName)
+	if err := manifest.WriteFile(path, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills:  []manifest.Skill{},
+	}); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	fileURL := "file://" + repoPath
+	cmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	cmd.SetArgs([]string{"add", fileURL})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	doc, err := manifest.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	wantSource := source.Git{URL: fileURL, Skills: []string{"repo-map"}}.String()
+	if len(doc.Skills) != 1 || doc.Skills[0].Source != wantSource {
+		t.Fatalf("skills = %#v, want source %q", doc.Skills, wantSource)
+	}
+}
+
 func TestAddLinksIntoCustomTargetFolder(t *testing.T) {
 	t.Parallel()
 
@@ -393,7 +432,7 @@ func TestAddRejectsInvalidSource(t *testing.T) {
 	if err == nil {
 		t.Fatal("Execute() error = nil, want error")
 	}
-	if !strings.Contains(err.Error(), "expected git:<url>[@ref]") {
+	if !strings.Contains(err.Error(), "expected git:<url>[@ref]") || !strings.Contains(err.Error(), "bare remote URL") {
 		t.Fatalf("Execute() error = %v, want git source error", err)
 	}
 }
@@ -728,8 +767,41 @@ func TestAddMultiSkillRepoRequiresExplicitSelectionInNonTTY(t *testing.T) {
 	if err == nil {
 		t.Fatal("Execute() error = nil, want explicit-selection guidance")
 	}
-	if !strings.Contains(err.Error(), "multiple skills found") || !strings.Contains(err.Error(), "--all") {
+	if !strings.Contains(err.Error(), "multiple skills found") || !strings.Contains(err.Error(), "--all") || !strings.Contains(err.Error(), "git:"+repoPath+"##alpha-skill,beta-skill") {
 		t.Fatalf("Execute() error = %v, want multi-skill guidance", err)
+	}
+}
+
+func TestAddMultiSkillRepoPreservesBareURLInNonTTYGuidance(t *testing.T) {
+	t.Parallel()
+
+	repoPath, _ := createMultiSkillRepo(t, "skill-pack", []multiSkillSpec{
+		{Path: filepath.Join("skills", "alpha-skill"), Name: "alpha-skill"},
+		{Path: filepath.Join("skills", "beta-skill"), Name: "beta-skill"},
+	})
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	if err := manifest.WriteFile(filepath.Join(projectDir, manifest.FileName), manifest.Default()); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	fileURL := "file://" + repoPath
+	cmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+		IsTTY:      func() bool { return false },
+	})
+	cmd.SetArgs([]string{"add", fileURL})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want explicit-selection guidance")
+	}
+	if !strings.Contains(err.Error(), fileURL+"##alpha-skill,beta-skill") {
+		t.Fatalf("Execute() error = %v, want bare-URL guidance", err)
 	}
 }
 

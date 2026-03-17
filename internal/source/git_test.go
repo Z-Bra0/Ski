@@ -28,6 +28,18 @@ func TestParseGit(t *testing.T) {
 			wantURL: "https://github.com/acme/repo-map.git",
 		},
 		{
+			name:    "bare https without prefix",
+			raw:     "https://github.com/acme/repo-map.git",
+			wantURL: "https://github.com/acme/repo-map.git",
+		},
+		{
+			name:       "bare https with ref and selectors",
+			raw:        "https://github.com/acme/repo-map.git@v1.0.0##beta-skill,alpha-skill",
+			wantURL:    "https://github.com/acme/repo-map.git",
+			wantRef:    "v1.0.0",
+			wantSkills: []string{"alpha-skill", "beta-skill"},
+		},
+		{
 			name:    "scp style",
 			raw:     "git:git@github.com:acme/repo-map.git@a1b2c3d",
 			wantURL: "git@github.com:acme/repo-map.git",
@@ -38,18 +50,18 @@ func TestParseGit(t *testing.T) {
 			raw:     "git:ssh://git@github.com/acme/repo-map.git",
 			wantURL: "ssh://git@github.com/acme/repo-map.git",
 		},
-			{
-				name:       "with skill selectors",
-				raw:        "git:https://github.com/acme/repo-map.git@v1.0.0##beta-skill,alpha-skill",
-				wantURL:    "https://github.com/acme/repo-map.git",
-				wantRef:    "v1.0.0",
-				wantSkills: []string{"alpha-skill", "beta-skill"},
-			},
-			{
-				name:    "single hash stays in url path",
-				raw:     "git:/tmp/skill#pack",
-				wantURL: "/tmp/skill#pack",
-			},
+		{
+			name:       "with skill selectors",
+			raw:        "git:https://github.com/acme/repo-map.git@v1.0.0##beta-skill,alpha-skill",
+			wantURL:    "https://github.com/acme/repo-map.git",
+			wantRef:    "v1.0.0",
+			wantSkills: []string{"alpha-skill", "beta-skill"},
+		},
+		{
+			name:    "single hash stays in url path",
+			raw:     "git:/tmp/skill#pack",
+			wantURL: "/tmp/skill#pack",
+		},
 		{
 			name:       "url fragment plus selectors",
 			raw:        "git:https://example.com/repo#fragment.git##alpha-skill",
@@ -69,7 +81,7 @@ func TestParseGit(t *testing.T) {
 		{
 			name:    "missing prefix",
 			raw:     "github:acme/repo-map",
-			wantErr: "expected git:<url>[@ref][##skill[,skill...]]",
+			wantErr: "expected git:<url>[@ref][##skill[,skill...]] or a bare remote URL",
 		},
 		{
 			name:    "missing url",
@@ -81,16 +93,16 @@ func TestParseGit(t *testing.T) {
 			raw:     "git:https://github.com/acme/repo-map.git@",
 			wantErr: "empty ref",
 		},
-			{
-				name:    "empty selector",
-				raw:     "git:https://github.com/acme/repo-map.git##",
-				wantErr: "empty skill selector",
-			},
-			{
-				name:    "invalid selector",
-				raw:     "git:https://github.com/acme/repo-map.git##bad_name",
-				wantErr: "invalid skill selector",
-			},
+		{
+			name:    "empty selector",
+			raw:     "git:https://github.com/acme/repo-map.git##",
+			wantErr: "empty skill selector",
+		},
+		{
+			name:    "invalid selector",
+			raw:     "git:https://github.com/acme/repo-map.git##bad_name",
+			wantErr: "invalid skill selector",
+		},
 	}
 
 	for _, tc := range tests {
@@ -130,6 +142,20 @@ func TestGitStringIncludesSortedSelectors(t *testing.T) {
 	want := "git:https://github.com/acme/repo-map.git@v1.0.0##alpha-skill,beta-skill"
 	if got != want {
 		t.Fatalf("String() = %q, want %q", got, want)
+	}
+}
+
+func TestParseGitBareRemoteStringCanonicalizesToGitPrefix(t *testing.T) {
+	t.Parallel()
+
+	got, err := ParseGit("https://github.com/acme/repo-map.git@v1.0.0##beta-skill,alpha-skill")
+	if err != nil {
+		t.Fatalf("ParseGit() error = %v", err)
+	}
+
+	want := "git:https://github.com/acme/repo-map.git@v1.0.0##alpha-skill,beta-skill"
+	if got.String() != want {
+		t.Fatalf("String() = %q, want %q", got.String(), want)
 	}
 }
 

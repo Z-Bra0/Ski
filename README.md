@@ -36,7 +36,7 @@ go run ./cmd/ski -- help
 ```bash
 ski init                         # create ski.toml
 # edit ski.toml and set targets = ["claude"]
-ski add git:https://github.com/org/repo-map.git
+ski add https://github.com/org/repo-map.git
 ski list                         # show installed skills
 ski doctor                       # verify links and lock state
 
@@ -44,9 +44,11 @@ ski doctor                       # verify links and lock state
 ski install                      # restore from ski.toml + ski.lock.json
 ```
 
-If a repo contains multiple skills, `ski add` prompts in a terminal. In non-interactive mode, use `git:<url>##skill-a,skill-b` or `ski add <source> --all`.
+If a repo contains multiple skills, `ski add` prompts in a terminal. In non-interactive mode, use `git:<url>##skill-a,skill-b`, `https://...##skill-a,skill-b`, or `ski add <source> --all`.
 
 If the repo URL or local path contains a literal `@`, `#`, or `\`, escape it in the source string as `\@`, `\#`, or `\\`. Example: `git:/tmp/skill\#\#pack`.
+
+URL-form git sources may omit the `git:` prefix, including `https://...`, `ssh://...`, `git://...`, and `file://...`. Plain local filesystem paths still require it, for example `git:/tmp/repo-map`.
 
 `targets = ["claude"]` in `ski.toml` means project-local installation into `./.claude/skills/`. Use `-g` to operate on `~/.ski/global.toml` / `~/.ski/global.lock.json` and link built-in targets into user-global agent directories such as `~/.claude/skills/`.
 
@@ -77,4 +79,4 @@ ski doctor [-g]                  # check links and lock/store consistency
 - [ARCHITECTURE.md](ARCHITECTURE.md) — internal design and Go layout
 - [DECISIONS.md](DECISIONS.md) — design decisions and rationale
 
-MVP source support is `git:` only. `github:` may be added later as a convenience alias over Git-hosted repositories.
+MVP source support is git repositories via canonical `git:` sources or bare URL-form sources such as `https://...` and `file://...`. `github:` may be added later as a convenience alias over Git-hosted repositories.
