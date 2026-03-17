@@ -516,6 +516,35 @@ func TestAddRejectsDuplicateSource(t *testing.T) {
 	}
 }
 
+func TestAddRejectsMixedSkillFlagAndLegacySelector(t *testing.T) {
+	t.Parallel()
+
+	repoPath, _ := createGitRepo(t, "repo-map", "repo-map")
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	path := filepath.Join(projectDir, manifest.FileName)
+	if err := manifest.WriteFile(path, manifest.Default()); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	cmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	cmd.SetArgs([]string{"add", "git:" + repoPath + "##repo-map", "--skill", "repo-map"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want selector conflict")
+	}
+	if !strings.Contains(err.Error(), "--skill cannot be used with legacy source selectors") {
+		t.Fatalf("Execute() error = %v, want selector conflict", err)
+	}
+}
+
 func TestAddRejectsInvalidSkillRepository(t *testing.T) {
 	t.Parallel()
 
@@ -555,7 +584,7 @@ func TestAddRejectsInvalidSkillRepository(t *testing.T) {
 	}
 }
 
-func TestAddMultiSkillRepoWithExplicitSelectors(t *testing.T) {
+func TestAddMultiSkillRepoWithSkillFlags(t *testing.T) {
 	t.Parallel()
 
 	repoPath, commit := createMultiSkillRepo(t, "skill-pack", []multiSkillSpec{
@@ -582,7 +611,7 @@ func TestAddMultiSkillRepoWithExplicitSelectors(t *testing.T) {
 		Stderr:     &bytes.Buffer{},
 		IsTTY:      func() bool { return false },
 	})
-	cmd.SetArgs([]string{"add", "git:" + repoPath + "##beta-skill,alpha-skill"})
+	cmd.SetArgs([]string{"add", "git:" + repoPath, "--skill", "beta-skill", "--skill", "alpha-skill"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute() error = %v", err)
@@ -630,6 +659,54 @@ func TestAddMultiSkillRepoWithExplicitSelectors(t *testing.T) {
 
 	if got := stdout.String(); !strings.Contains(got, "added 2 skills") {
 		t.Fatalf("stdout = %q, want multi-add confirmation", got)
+	}
+}
+
+func TestAddSupportsLegacySourceSelectors(t *testing.T) {
+	t.Parallel()
+
+	repoPath, _ := createMultiSkillRepo(t, "skill-pack", []multiSkillSpec{
+		{Path: filepath.Join("skills", "alpha-skill"), Name: "alpha-skill"},
+		{Path: filepath.Join("skills", "beta-skill"), Name: "beta-skill"},
+	})
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	path := filepath.Join(projectDir, manifest.FileName)
+	if err := manifest.WriteFile(path, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills:  []manifest.Skill{},
+	}); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	cmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+		IsTTY:      func() bool { return false },
+	})
+	cmd.SetArgs([]string{"add", "git:" + repoPath + "##beta-skill"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	doc, err := manifest.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(manifest) error = %v", err)
+	}
+	want := manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills: []manifest.Skill{
+			{Name: "beta-skill", Source: "git:" + repoPath, UpstreamSkill: "beta-skill"},
+		},
+	}
+	if !reflect.DeepEqual(*doc, want) {
+		t.Fatalf("manifest = %#v, want %#v", *doc, want)
 	}
 }
 
@@ -708,7 +785,7 @@ func TestAddMultiSkillRepoRollsBackOnSecondSkillLinkConflict(t *testing.T) {
 		Stderr:     &bytes.Buffer{},
 		IsTTY:      func() bool { return false },
 	})
-	cmd.SetArgs([]string{"add", "git:" + repoPath + "##alpha-skill,beta-skill"})
+	cmd.SetArgs([]string{"add", "git:" + repoPath, "--skill", "alpha-skill", "--skill", "beta-skill"})
 
 	err := cmd.Execute()
 	if err == nil {
@@ -770,7 +847,7 @@ func TestAddMultiSkillRepoRequiresExplicitSelectionInNonTTY(t *testing.T) {
 	if err == nil {
 		t.Fatal("Execute() error = nil, want explicit-selection guidance")
 	}
-	if !strings.Contains(err.Error(), "multiple skills found") || !strings.Contains(err.Error(), "--all") || !strings.Contains(err.Error(), "git:"+repoPath+"##alpha-skill,beta-skill") {
+	if !strings.Contains(err.Error(), "multiple skills found") || !strings.Contains(err.Error(), "--all") || !strings.Contains(err.Error(), "--skill alpha-skill") || !strings.Contains(err.Error(), "--skill beta-skill") {
 		t.Fatalf("Execute() error = %v, want multi-skill guidance", err)
 	}
 }
@@ -803,7 +880,7 @@ func TestAddMultiSkillRepoPreservesBareURLInNonTTYGuidance(t *testing.T) {
 	if err == nil {
 		t.Fatal("Execute() error = nil, want explicit-selection guidance")
 	}
-	if !strings.Contains(err.Error(), fileURL+"##alpha-skill,beta-skill") {
+	if !strings.Contains(err.Error(), fileURL) || !strings.Contains(err.Error(), "--skill alpha-skill") || !strings.Contains(err.Error(), "--skill beta-skill") {
 		t.Fatalf("Execute() error = %v, want bare-URL guidance", err)
 	}
 }

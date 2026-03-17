@@ -15,6 +15,7 @@ import (
 func newAddCmd(opts Options) *cobra.Command {
 	var name string
 	var addAll bool
+	var skills []string
 
 	cmd := &cobra.Command{
 		Use:   "add <source>",
@@ -30,11 +31,17 @@ func newAddCmd(opts Options) *cobra.Command {
 				return err
 			}
 
-			if len(src.Skills) > 0 && addAll {
+			if len(src.Skills) > 0 && len(skills) > 0 {
+				return fmt.Errorf("--skill cannot be used with legacy source selectors")
+			}
+			if (len(src.Skills) > 0 || len(skills) > 0) && addAll {
 				return fmt.Errorf("--all cannot be used with explicit skill selectors")
 			}
 
-			selected := append([]string(nil), src.Skills...)
+			selected := append([]string(nil), skills...)
+			if len(selected) == 0 {
+				selected = append(selected, src.Skills...)
+			}
 			added, err := svc.AddSelected(args[0], selected, name)
 			if err != nil {
 				var multiErr app.MultiSkillSelectionError
@@ -42,7 +49,7 @@ func newAddCmd(opts Options) *cobra.Command {
 					return err
 				}
 
-				selected, err = resolveAddSelection(cmd, opts, args[0], src.Skills, multiErr.Skills, addAll)
+				selected, err = resolveAddSelection(cmd, opts, args[0], selected, multiErr.Skills, addAll)
 				if err != nil {
 					return err
 				}
@@ -62,6 +69,7 @@ func newAddCmd(opts Options) *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&name, "name", "", "Override the local skill name written to ski.toml for a single selected skill")
+	cmd.Flags().StringSliceVar(&skills, "skill", nil, "Select one or more discovered upstream skills by name")
 	cmd.Flags().BoolVar(&addAll, "all", false, "Add all skills discovered in the repository")
 	return cmd
 }
@@ -76,10 +84,18 @@ func resolveAddSelection(cmd *cobra.Command, opts Options, rawSource string, exp
 	}
 
 	if !opts.IsTTY() {
-		return nil, fmt.Errorf("multiple skills found; rerun with %s##%s or --all", strings.TrimSpace(rawSource), strings.Join(discovered, ","))
+		return nil, fmt.Errorf("multiple skills found; rerun with %s %s or --all", strings.TrimSpace(rawSource), formatSkillFlags(discovered))
 	}
 
 	return promptForSkills(cmd, discovered)
+}
+
+func formatSkillFlags(skills []string) string {
+	parts := make([]string, 0, len(skills))
+	for _, skill := range skills {
+		parts = append(parts, "--skill "+skill)
+	}
+	return strings.Join(parts, " ")
 }
 
 func promptForSkills(cmd *cobra.Command, discovered []string) ([]string, error) {

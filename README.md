@@ -44,7 +44,7 @@ ski doctor                       # verify links and lock state
 ski install                      # restore from ski.toml + ski.lock.json
 ```
 
-If a repo contains multiple skills, `ski add` prompts in a terminal. In non-interactive mode, use `git:<url>##skill-a,skill-b`, `https://...##skill-a,skill-b`, or `ski add <source> --all`.
+If a repo contains multiple skills, `ski add` prompts in a terminal. In non-interactive mode, use `ski add <source> --skill skill-a --skill skill-b` or `ski add <source> --all`. Legacy `##skill-a,skill-b` source selectors are still accepted during migration.
 
 If the repo URL or local path contains a literal `@`, `#`, or `\`, escape it in the source string as `\@`, `\#`, or `\\`. Example: `git:/tmp/skill\#\#pack`.
 
@@ -61,6 +61,7 @@ Custom target folders use a `dir:` prefix. In local scope, `dir:./agent-skills/c
 ```bash
 ski init [-g]                    # create the local or global manifest
 ski add [-g] <source>            # add + fetch + link
+ski add [-g] <source> --skill x  # add selected upstream skill(s) from one repo
 ski add [-g] <source> --all      # add all discovered skills from one repo
 ski add [-g] <source> --name x   # alias one selected skill locally
 ski install [-g]                 # restore from manifest + lockfile

@@ -28,15 +28,15 @@ Reference spec: <https://agentskills.io/specification>
 
 ## Source Specifiers
 
-MVP accepts canonical `git:<url>` sources plus bare URL-form git sources such as `https://...`, `ssh://...`, `git://...`, and `file://...`, with optional `@<tag-or-commit>` and optional `##<skill-name>[,<skill-name>...]`.
+MVP accepts canonical `git:<url>` sources plus bare URL-form git sources such as `https://...`, `ssh://...`, `git://...`, and `file://...`, with optional `@<tag-or-commit>`.
 
 | Adapter | Format | Example |
 |---------|--------|---------|
-| `git` | `git:<url>[@ref][##skill[,skill...]]` or bare URL-form git source | `https://github.com/org/skill-pack.git@a1b2c3d##repo-map,audit-skill` |
+| `git` | `git:<url>[@ref]` or bare URL-form git source | `https://github.com/org/skill-pack.git@a1b2c3d` |
 
 `@ref` is optional. When omitted, resolves to default branch HEAD. `ref` can be a tag or a commit SHA.
 
-`##skill[,skill...]` is optional and selects discovered skills by their `name` in `SKILL.md`.
+`ski add` may also accept a legacy `##skill[,skill...]` suffix during migration. Canonical manifests and lockfiles store the selected upstream skill in `upstream_skill` instead.
 
 Bare URL-form git sources are normalized back to canonical `git:` strings when `ski.toml` and `ski.lock.json` are written. Plain local filesystem paths still require the `git:` prefix.
 
@@ -52,7 +52,7 @@ The skill `name` in `ski.toml` defaults to the discovered skill `name` from `SKI
 
 | Adapter | Rule | Example |
 |---------|------|---------|
-| `git` | selected skill `name` from `SKILL.md` | `git:https://x.com/org/skill-pack.git##repo-map` → `repo-map` |
+| `git` | selected skill `name` from `SKILL.md` | `source = "git:https://x.com/org/skill-pack.git"` and `upstream_skill = "repo-map"` → `repo-map` |
 
 For a single selected skill, `ski add --name <alias>` overrides the local project name written to `ski.toml` and used for target symlinks. The `source` field still points at the discovered upstream skill name.
 
@@ -178,14 +178,14 @@ The initial manifest contains `version = 1` and `targets = []`.
 
 Validates a `git:` source, discovers `SKILL.md` files recursively up to depth 3, and writes one manifest entry per selected skill.
 
-If the source includes `##skill[,skill...]`, only those discovered skills are added.
+If `--skill <name>` is provided, only those discovered skills are added. `--skill` may be repeated.
 
-If the source omits `##...` and the repository contains exactly one skill, `ski add` adds that skill automatically.
+If no `--skill` is provided and the repository contains exactly one skill, `ski add` adds that skill automatically.
 
-If the source omits `##...` and the repository contains multiple skills:
+If no `--skill` is provided and the repository contains multiple skills:
 
 - on a TTY, `ski add` prompts the user to select skill names explicitly
-- in non-interactive mode, `ski add` fails and asks the user to rerun with `##skill[,skill...]` or `--all`
+- in non-interactive mode, `ski add` fails and asks the user to rerun with `--skill <name>` or `--all`
 
 `ski add --all` adds every discovered skill in the repository.
 
