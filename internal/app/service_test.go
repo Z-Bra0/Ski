@@ -136,6 +136,97 @@ func TestInstallRollsBackAfterLinkFailure(t *testing.T) {
 	}
 }
 
+func TestUpdateRollsBackAfterLinkFailure(t *testing.T) {
+	t.Parallel()
+
+	repoPath := createMultiSkillRepo(t, "skill-pack", []multiSkillSpec{
+		{Path: filepath.Join("skills", "alpha-skill"), Name: "alpha-skill"},
+		{Path: filepath.Join("skills", "beta-skill"), Name: "beta-skill"},
+	})
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	manifestPath := filepath.Join(projectDir, manifest.FileName)
+	if err := manifest.WriteFile(manifestPath, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills: []manifest.Skill{
+			{Name: "alpha-skill", Source: "git:" + repoPath + "##alpha-skill"},
+			{Name: "beta-skill", Source: "git:" + repoPath + "##beta-skill"},
+		},
+	}); err != nil {
+		t.Fatalf("WriteFile(manifest) error = %v", err)
+	}
+
+	svc := Service{
+		ProjectDir: projectDir,
+		HomeDir:    homeDir,
+	}
+	if _, err := svc.Install(); err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+
+	originalLock, err := lockfile.ReadFile(lockfile.Path(projectDir))
+	if err != nil {
+		t.Fatalf("ReadFile(lockfile) error = %v", err)
+	}
+	if len(originalLock.Skills) != 2 {
+		t.Fatalf("original lockfile skills = %#v, want 2", originalLock.Skills)
+	}
+	originalCommit := originalLock.Skills[0].Commit
+
+	if err := os.WriteFile(filepath.Join(repoPath, "update-marker.txt"), []byte("second\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(update-marker) error = %v", err)
+	}
+	runGitTest(t, repoPath, "add", ".")
+	runGitTest(t, repoPath, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "update")
+
+	callCount := 0
+	svc.linkAllFn = func(targets []string, name, storePath string) error {
+		callCount++
+		if callCount == 2 {
+			return fmt.Errorf("forced update link failure for %s", name)
+		}
+		return target.LinkAll(projectDir, targets, name, storePath)
+	}
+	svc.unlinkAllFn = func(targets []string, name string) error {
+		return target.UnlinkAll(projectDir, targets, name)
+	}
+
+	updates, err := svc.Update("")
+	if err == nil {
+		t.Fatal("Update() error = nil, want forced link failure")
+	}
+	if updates != nil {
+		t.Fatalf("Update() updates = %#v, want nil on rollback", updates)
+	}
+	if !strings.Contains(err.Error(), "forced update link failure for beta-skill") {
+		t.Fatalf("Update() error = %v, want forced update link failure", err)
+	}
+
+	restoredLock, err := lockfile.ReadFile(lockfile.Path(projectDir))
+	if err != nil {
+		t.Fatalf("ReadFile(lockfile restored) error = %v", err)
+	}
+	for _, skill := range restoredLock.Skills {
+		if skill.Commit != originalCommit {
+			t.Fatalf("restored lock skill = %#v, want original commit %q", skill, originalCommit)
+		}
+	}
+
+	for _, skillName := range []string{"alpha-skill", "beta-skill"} {
+		linkPath := filepath.Join(projectDir, ".claude", "skills", skillName)
+		targetPath, err := os.Readlink(linkPath)
+		if err != nil {
+			t.Fatalf("Readlink(%s) error = %v", skillName, err)
+		}
+		wantStore := filepath.Join(homeDir, ".ski", "store", "git", "skill-pack", originalCommit, "skills", skillName)
+		if targetPath != wantStore {
+			t.Fatalf("%s symlink target = %q, want %q", skillName, targetPath, wantStore)
+		}
+	}
+}
+
 type multiSkillSpec struct {
 	Path string
 	Name string
