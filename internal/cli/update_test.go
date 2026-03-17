@@ -262,6 +262,41 @@ func TestUpdateSpecificSkillOnly(t *testing.T) {
 	}
 }
 
+func TestUpdateGlobalMissingSkillIncludesGlobalManifestPath(t *testing.T) {
+	t.Parallel()
+
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	globalManifestPath := manifest.GlobalPath(homeDir)
+	if err := os.MkdirAll(filepath.Dir(globalManifestPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := manifest.WriteFile(globalManifestPath, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills:  []manifest.Skill{},
+	}); err != nil {
+		t.Fatalf("WriteFile(manifest) error = %v", err)
+	}
+
+	updateCmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	updateCmd.SetArgs([]string{"update", "-g", "missing-skill"})
+
+	err := updateCmd.Execute()
+	if err == nil {
+		t.Fatal("update Execute() error = nil, want missing skill error")
+	}
+	if !strings.Contains(err.Error(), globalManifestPath) {
+		t.Fatalf("update error = %q, want manifest path %q", err.Error(), globalManifestPath)
+	}
+}
+
 func TestUpdateFailsIfSkillNotFound(t *testing.T) {
 	t.Parallel()
 

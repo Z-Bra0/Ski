@@ -37,7 +37,7 @@ func (s Service) CheckUpdates(name string) ([]UpdateInfo, error) {
 		return nil, err
 	}
 
-	selected, err := selectSkills(doc, name)
+	selected, err := selectSkills(doc, name, s.manifestPath())
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +87,7 @@ func (s Service) Update(name string) ([]UpdateInfo, error) {
 		return nil, fmt.Errorf("read %s: %w", lockPath, err)
 	}
 
-	selected, err := selectSkills(doc, name)
+	selected, err := selectSkills(doc, name, s.manifestPath())
 	if err != nil {
 		return nil, err
 	}

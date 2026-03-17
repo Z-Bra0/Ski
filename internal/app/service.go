@@ -352,14 +352,14 @@ func sameStrings(a, b []string) bool {
 	return true
 }
 
-func selectSkills(doc *manifest.Manifest, name string) ([]manifest.Skill, error) {
+func selectSkills(doc *manifest.Manifest, name string, manifestPath string) ([]manifest.Skill, error) {
 	if name == "" {
 		return doc.Skills, nil
 	}
 
 	skill, ok := findSkill(doc.Skills, func(skill manifest.Skill) bool { return skill.Name == name })
 	if !ok {
-		return nil, fmt.Errorf("skill %q not found in manifest", name)
+		return nil, fmt.Errorf("skill %q not found in %s", name, manifestPath)
 	}
 	return []manifest.Skill{skill}, nil
 }
