@@ -153,9 +153,15 @@ For single-skill repositories, this is equivalent to hashing the skill contents.
 
 ---
 
-## Version Semantics
+## Version Fields
 
-`version` in `ski.toml` is informational. The store keeps one copy per skill (by commit SHA). `ski update` uses the version field to detect and report newer upstream releases.
+Three different version concepts exist in the system:
+
+- manifest `version` in `ski.toml` — manifest schema version, currently `1`
+- lockfile `version` in `ski.lock.json` — lockfile schema version, currently `1`
+- skill entry `version` in `ski.toml` / `ski.lock.json` — informational upstream release version used for update reporting
+
+The store still keeps one copy per skill snapshot by commit SHA. The skill entry `version` does not control store identity or install resolution.
 
 ---
 
@@ -235,6 +241,8 @@ Store contents are left in `~/.ski/store/`.
 Prints the CLI version embedded at build time.
 
 Development builds without an injected release version print `dev`.
+
+This CLI build version is separate from the manifest and lockfile schema versions above.
 
 ---
 

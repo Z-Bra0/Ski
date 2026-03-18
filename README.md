@@ -25,7 +25,7 @@ Install skills from Git repositories into agent platforms such as Claude, Codex,
 ## Build
 
 ```bash
-make build
+make build                     # local dev build; `ski version` prints `dev`
 make release VERSION=0.1.0
 ```
 
@@ -69,6 +69,7 @@ ski version
 - Use `ski` only with skill repositories you have verified and trust. Review the upstream repo and `SKILL.md` before `add`, `install`, or `update`.
 - `ski add` prompts when a repo contains multiple skills. In non-interactive mode, use `--skill` or `--all`.
 - Supported sources are remote Git endpoints. You can use `git:https://...` or omit the `git:` prefix for URL-form sources such as `https://...`, `ssh://...`, and `git://...`.
+- `ski version` reports the CLI build version. Dev builds print `dev`; release builds use the version passed to `make release VERSION=...`.
 - Local targets write into the project. `-g` uses `~/.ski/global.toml` and global agent directories instead.
 - Custom target folders use `dir:`. For example: `dir:./agent-skills/claude`.
 
