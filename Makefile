@@ -5,8 +5,10 @@ BIN := dist/ski
 GO_SOURCES := $(shell find cmd internal -name '*.go')
 BUILD_INPUTS := $(GO_SOURCES) go.mod go.sum Makefile
 VERSION_STAMP := dist/.version-$(VERSION)
-LDFLAGS := -X ski/internal/buildinfo.Version=$(VERSION)
+LDFLAGS := -X github.com/Z-Bra0/Ski/internal/buildinfo.Version=$(VERSION)
 RELEASE_PLATFORMS := darwin-arm64 darwin-amd64 linux-amd64 linux-arm64
+RELEASE_ARCHIVES := $(foreach platform,$(RELEASE_PLATFORMS),dist/ski_$(VERSION)_$(subst -,_,$(platform)).tar.gz)
+CHECKSUMS_FILE := dist/ski_$(VERSION)_checksums.txt
 
 build: $(BIN)
 
@@ -35,6 +37,14 @@ assert-release-version:
 	fi
 
 release: assert-release-version $(RELEASE_PLATFORMS:%=release-%)
+	@if command -v shasum >/dev/null 2>&1; then \
+		shasum -a 256 $(RELEASE_ARCHIVES) > $(CHECKSUMS_FILE); \
+	elif command -v sha256sum >/dev/null 2>&1; then \
+		sha256sum $(RELEASE_ARCHIVES) > $(CHECKSUMS_FILE); \
+	else \
+		echo "shasum or sha256sum is required to generate release checksums"; \
+		exit 1; \
+	fi
 
 release-darwin-arm64: assert-release-version $(BUILD_INPUTS)
 	$(call build_release,darwin,arm64)

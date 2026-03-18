@@ -55,6 +55,28 @@ need_cmd() {
 	fi
 }
 
+sha256_file() {
+	file="$1"
+
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum "$file" | cut -d ' ' -f 1
+		return
+	fi
+
+	if command -v shasum >/dev/null 2>&1; then
+		shasum -a 256 "$file" | cut -d ' ' -f 1
+		return
+	fi
+
+	if command -v openssl >/dev/null 2>&1; then
+		openssl dgst -sha256 "$file" | sed 's/^.*= //'
+		return
+	fi
+
+	echo "sha256sum, shasum, or openssl is required to verify ski" >&2
+	exit 1
+}
+
 download_to() {
 	url="$1"
 	dest="$2"
@@ -140,23 +162,47 @@ need_cmd chmod
 need_cmd cp
 need_cmd find
 need_cmd sed
+need_cmd grep
+need_cmd cut
 
 detect_platform
 resolve_version
 
 artifact="ski_${VERSION#v}_${OS}_${ARCH}.tar.gz"
 download_url="https://github.com/$REPO_OWNER/$REPO_NAME/releases/download/$VERSION/$artifact"
+checksums_name="ski_${VERSION#v}_checksums.txt"
+checksums_url="https://github.com/$REPO_OWNER/$REPO_NAME/releases/download/$VERSION/$checksums_name"
 
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT INT TERM
 
 archive_path="$tmpdir/$artifact"
+checksums_path="$tmpdir/$checksums_name"
 extract_dir="$tmpdir/extract"
 
 mkdir -p "$extract_dir" "$INSTALL_DIR"
 
 echo "Downloading $download_url"
 download_to "$download_url" "$archive_path"
+
+echo "Downloading $checksums_url"
+download_to "$checksums_url" "$checksums_path"
+
+expected_sha256="$(grep "  $artifact\$" "$checksums_path" | cut -d ' ' -f 1 | head -n 1)"
+if [ -z "$expected_sha256" ]; then
+	echo "failed to find a checksum for $artifact" >&2
+	exit 1
+fi
+
+actual_sha256="$(sha256_file "$archive_path")"
+if [ "$actual_sha256" != "$expected_sha256" ]; then
+	echo "checksum verification failed for $artifact" >&2
+	echo "expected: $expected_sha256" >&2
+	echo "actual:   $actual_sha256" >&2
+	exit 1
+fi
+
+echo "Verified SHA-256 checksum for $artifact"
 
 tar -xzf "$archive_path" -C "$extract_dir"
 
