@@ -30,21 +30,18 @@ Teams copy skill folders into `.claude/skills`, `.codex/skills`, and other agent
 curl -fsSL https://raw.githubusercontent.com/Z-Bra0/Ski/master/scripts/install.sh | sh
 ```
 
-Install a specific release:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Z-Bra0/Ski/master/scripts/install.sh | sh -s -- --version v0.1.1
-```
-
 ---
 
 ## Quick Start
 
 ```bash
-ski init
+ski init --target claude
 ski add https://github.com/org/repo-map.git
-ski install
 ```
+
+`ski add` is the first-time workflow: it updates `ski.toml`, resolves and writes `ski.lock.json`, fetches the skill into the store, and links it into the configured targets.
+
+Use `ski install` later to restore skills from `ski.toml` and `ski.lock.json`, for example in a fresh clone.
 
 ---
 
@@ -55,7 +52,6 @@ Share one `repo-map` skill across Claude and Codex:
 ```bash
 ski init --target claude --target codex
 ski add https://github.com/org/repo-map.git
-ski install
 ```
 
 This keeps one stored copy of the skill and links it into both `.claude/skills` and `.codex/skills`.
@@ -65,10 +61,15 @@ Pin a team audit skill to a specific commit:
 ```bash
 ski init --target claude
 ski add git:https://github.com/acme/team-audit-skill.git@9f3c2ab
-ski install
 ```
 
 This makes the project reproducible because the manifest and lockfile keep the selected source and resolved revision explicit.
+
+Restore skills from the manifest and lockfile in a fresh clone:
+
+```bash
+ski install
+```
 
 ---
 
