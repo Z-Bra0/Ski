@@ -14,4 +14,5 @@ Key design decisions and their rationale.
 - `skillhub`/`clawhub` adapters deferred — API formats unknown; they are outside the MVP
 - Windows/symlink support deferred — needs research; macOS/Linux only for v1
 - Multi-skill repos via `#subpath` — original idea, now superseded by skill-name selectors because selecting by `SKILL.md` metadata keeps the source syntax simpler for users
+- Remote-only git sources — local filesystem repositories were removed from the public source syntax to keep manifests portable and reduce scope-specific path handling.
 - Multi-skill repos via skill-name selectors — `ski add` recursively discovers `SKILL.md` files up to depth 3, prompts on TTY when multiple skills are found, and uses `git:<url>[@ref]##skill-a,skill-b` plus `--all` for non-interactive selection. Literal `@`, `#`, and `\` in the URL/ref are escaped as `\@`, `\#`, and `\\`. Canonical manifest entries are written one selected skill at a time, for example `git:<url>##skill-a`.

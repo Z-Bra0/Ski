@@ -28,7 +28,7 @@ Reference spec: <https://agentskills.io/specification>
 
 ## Source Specifiers
 
-MVP accepts canonical `git:<url>` sources plus bare URL-form git sources such as `https://...`, `ssh://...`, `git://...`, and `file://...`, with optional `@<tag-or-commit>`.
+MVP accepts canonical `git:<url>` sources plus bare URL-form remote git sources such as `https://...`, `ssh://...`, and `git://...`, with optional `@<tag-or-commit>`.
 
 | Adapter | Format | Example |
 |---------|--------|---------|
@@ -38,9 +38,9 @@ MVP accepts canonical `git:<url>` sources plus bare URL-form git sources such as
 
 `ski add` may also accept a legacy `##skill[,skill...]` suffix during migration. Canonical manifests and lockfiles store the selected upstream skill in `upstream_skill` instead.
 
-Bare URL-form git sources are normalized back to canonical `git:` strings when `ski.toml` and `ski.lock.json` are written. Plain local filesystem paths still require the `git:` prefix.
+Bare URL-form git sources are normalized back to canonical `git:` strings when `ski.toml` and `ski.lock.json` are written. Local filesystem repositories are not supported as manifest sources.
 
-Literal `@`, `#`, or `\` characters in the URL or ref must be escaped as `\@`, `\#`, and `\\`. For example, a local repo at `/tmp/skill##pack` is written as ``git:/tmp/skill\#\#pack``.
+Literal `@`, `#`, or `\` characters in the URL or ref must be escaped as `\@`, `\#`, and `\\`. For example, `git@github.com:org/skill\#\#pack.git` preserves a literal `##` in the repository path.
 
 `github:` is deferred to a later version as a convenience alias over Git-hosted repositories.
 
@@ -141,11 +141,7 @@ Commands without `-g` operate on local scope.
 
 Commands with `-g` / `--global` operate only on global scope. Local and global manifests/lockfiles are fully separate.
 
-For local git repositories:
-
-- local scope resolves relative `git:` paths against the project root
-- `ski add -g` canonicalizes relative local git paths to absolute paths before writing `~/.ski/global.toml`
-- hand-edited global manifests should use absolute local git paths, not relative ones
+Local filesystem git repositories are not supported as manifest sources in either local or global scope.
 
 ---
 

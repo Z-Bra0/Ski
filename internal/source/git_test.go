@@ -2,11 +2,10 @@ package source
 
 import (
 	"errors"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
+
+	"ski/internal/testutil"
 )
 
 func TestParseGit(t *testing.T) {
@@ -62,30 +61,15 @@ func TestParseGit(t *testing.T) {
 			wantSkills: []string{"alpha-skill", "beta-skill"},
 		},
 		{
-			name:    "single hash stays in url path",
-			raw:     "git:/tmp/skill#pack",
-			wantURL: "/tmp/skill#pack",
-		},
-		{
 			name:       "url fragment plus selectors",
 			raw:        "git:https://example.com/repo#fragment.git##alpha-skill",
 			wantURL:    "https://example.com/repo#fragment.git",
 			wantSkills: []string{"alpha-skill"},
 		},
 		{
-			name:    "escaped double hash stays in local path",
-			raw:     `git:/tmp/example/repo\#\#pack`,
-			wantURL: "/tmp/example/repo##pack",
-		},
-		{
-			name:    "escaped at sign stays in local path",
-			raw:     `git:/tmp/example/repo\@pack`,
-			wantURL: "/tmp/example/repo@pack",
-		},
-		{
 			name:    "missing prefix",
 			raw:     "github:acme/repo-map",
-			wantErr: "expected git:<url>[@ref][##skill[,skill...]] or a bare remote URL",
+			wantErr: "expected a remote git source",
 		},
 		{
 			name:    "missing url",
@@ -96,6 +80,21 @@ func TestParseGit(t *testing.T) {
 			name:    "empty ref",
 			raw:     "git:https://github.com/acme/repo-map.git@",
 			wantErr: "empty ref",
+		},
+		{
+			name:    "reject local filesystem path",
+			raw:     "git:/tmp/skill#pack",
+			wantErr: "local filesystem git sources are not supported",
+		},
+		{
+			name:    "reject escaped local path",
+			raw:     `git:/tmp/example/repo\#\#pack`,
+			wantErr: "local filesystem git sources are not supported",
+		},
+		{
+			name:    "reject file url",
+			raw:     "file:///tmp/repo-map",
+			wantErr: "local filesystem git sources are not supported",
 		},
 		{
 			name:    "empty selector",
@@ -181,7 +180,7 @@ func TestGitRoundTripWithEscapedURLSeparators(t *testing.T) {
 	t.Parallel()
 
 	original := Git{
-		URL:    "/tmp/example/repo##pack",
+		URL:    "git@github.com:acme/repo##pack.git",
 		Ref:    "release@2026#1",
 		Skills: []string{"beta-skill", "alpha-skill"},
 	}
@@ -212,11 +211,6 @@ func TestGitDeriveName(t *testing.T) {
 		{
 			name:   "scp style url",
 			source: Git{URL: "git@github.com:acme/repo-map.git"},
-			want:   "repo-map",
-		},
-		{
-			name:   "local path",
-			source: Git{URL: "../skills/repo-map"},
 			want:   "repo-map",
 		},
 		{
@@ -284,10 +278,10 @@ func TestIsCommitRef(t *testing.T) {
 func TestResolveGitReturnsTypedNoMatchingRevisionError(t *testing.T) {
 	t.Parallel()
 
-	repoPath := createLocalGitRepo(t, "repo-map")
+	repo := testutil.NewPlainRepo(t, "repo-map")
 
-	_, err := ResolveGit(repoPath, Git{
-		URL: repoPath,
+	_, err := ResolveGit(repo.Path, Git{
+		URL: repo.URL,
 		Ref: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
 	})
 	if err == nil {
@@ -306,35 +300,6 @@ func TestResolveGitReturnsTypedNoMatchingRevisionError(t *testing.T) {
 	}
 	if typedErr.Ref != "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" {
 		t.Fatalf("NoMatchingRevisionError.Ref = %q, want pinned ref", typedErr.Ref)
-	}
-}
-
-func createLocalGitRepo(t *testing.T, repoName string) string {
-	t.Helper()
-
-	root := t.TempDir()
-	repoPath := filepath.Join(root, repoName)
-	if err := os.MkdirAll(repoPath, 0o755); err != nil {
-		t.Fatalf("MkdirAll() error = %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(repoPath, "README.md"), []byte("# test\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile(README.md) error = %v", err)
-	}
-
-	runGitSourceTest(t, root, "init", repoPath)
-	runGitSourceTest(t, repoPath, "add", ".")
-	runGitSourceTest(t, repoPath, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "initial")
-	return repoPath
-}
-
-func runGitSourceTest(t *testing.T, dir string, args ...string) {
-	t.Helper()
-
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %v error = %v\n%s", args, err, string(output))
 	}
 }
 

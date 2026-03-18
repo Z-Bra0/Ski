@@ -3,7 +3,6 @@ package app
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,12 +10,13 @@ import (
 	"ski/internal/lockfile"
 	"ski/internal/manifest"
 	"ski/internal/target"
+	"ski/internal/testutil"
 )
 
 func TestAddSelectedRollsBackAfterLinkFailure(t *testing.T) {
 	t.Parallel()
 
-	repoPath := createMultiSkillRepo(t, "skill-pack", []multiSkillSpec{
+	repo := createMultiSkillRepo(t, "skill-pack", []multiSkillSpec{
 		{Path: filepath.Join("skills", "alpha-skill"), Name: "alpha-skill"},
 		{Path: filepath.Join("skills", "beta-skill"), Name: "beta-skill"},
 	})
@@ -48,7 +48,7 @@ func TestAddSelectedRollsBackAfterLinkFailure(t *testing.T) {
 			return target.UnlinkAll(projectDir, targets, name)
 		},
 	}
-	_, err := svc.AddSelected("git:"+repoPath, []string{"alpha-skill", "beta-skill"}, "")
+	_, err := svc.AddSelected("git:"+repo.URL, []string{"alpha-skill", "beta-skill"}, "")
 	if err == nil {
 		t.Fatal("AddSelected() error = nil, want forced link failure")
 	}
@@ -79,7 +79,7 @@ func TestAddSelectedRollsBackAfterLinkFailure(t *testing.T) {
 func TestInstallRollsBackAfterLinkFailure(t *testing.T) {
 	t.Parallel()
 
-	repoPath := createMultiSkillRepo(t, "skill-pack", []multiSkillSpec{
+	repo := createMultiSkillRepo(t, "skill-pack", []multiSkillSpec{
 		{Path: filepath.Join("skills", "alpha-skill"), Name: "alpha-skill"},
 		{Path: filepath.Join("skills", "beta-skill"), Name: "beta-skill"},
 	})
@@ -91,8 +91,8 @@ func TestInstallRollsBackAfterLinkFailure(t *testing.T) {
 		Version: 1,
 		Targets: []string{"claude"},
 		Skills: []manifest.Skill{
-			{Name: "alpha-skill", Source: "git:" + repoPath + "##alpha-skill"},
-			{Name: "beta-skill", Source: "git:" + repoPath + "##beta-skill"},
+			{Name: "alpha-skill", Source: "git:" + repo.URL + "##alpha-skill"},
+			{Name: "beta-skill", Source: "git:" + repo.URL + "##beta-skill"},
 		},
 	}); err != nil {
 		t.Fatalf("WriteFile(manifest) error = %v", err)
@@ -139,7 +139,7 @@ func TestInstallRollsBackAfterLinkFailure(t *testing.T) {
 func TestUpdateRollsBackAfterLinkFailure(t *testing.T) {
 	t.Parallel()
 
-	repoPath := createMultiSkillRepo(t, "skill-pack", []multiSkillSpec{
+	repo := createMultiSkillRepo(t, "skill-pack", []multiSkillSpec{
 		{Path: filepath.Join("skills", "alpha-skill"), Name: "alpha-skill"},
 		{Path: filepath.Join("skills", "beta-skill"), Name: "beta-skill"},
 	})
@@ -151,8 +151,8 @@ func TestUpdateRollsBackAfterLinkFailure(t *testing.T) {
 		Version: 1,
 		Targets: []string{"claude"},
 		Skills: []manifest.Skill{
-			{Name: "alpha-skill", Source: "git:" + repoPath + "##alpha-skill"},
-			{Name: "beta-skill", Source: "git:" + repoPath + "##beta-skill"},
+			{Name: "alpha-skill", Source: "git:" + repo.URL + "##alpha-skill"},
+			{Name: "beta-skill", Source: "git:" + repo.URL + "##beta-skill"},
 		},
 	}); err != nil {
 		t.Fatalf("WriteFile(manifest) error = %v", err)
@@ -175,11 +175,11 @@ func TestUpdateRollsBackAfterLinkFailure(t *testing.T) {
 	}
 	originalCommit := originalLock.Skills[0].Commit
 
-	if err := os.WriteFile(filepath.Join(repoPath, "update-marker.txt"), []byte("second\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(repo.Path, "update-marker.txt"), []byte("second\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile(update-marker) error = %v", err)
 	}
-	runGitTest(t, repoPath, "add", ".")
-	runGitTest(t, repoPath, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "update")
+	testutil.RunGit(t, repo.Path, "add", ".")
+	testutil.RunGit(t, repo.Path, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "update")
 
 	callCount := 0
 	svc.linkAllFn = func(targets []string, name, storePath string) error {
@@ -232,50 +232,12 @@ type multiSkillSpec struct {
 	Name string
 }
 
-func createMultiSkillRepo(t *testing.T, repoName string, specs []multiSkillSpec) string {
+func createMultiSkillRepo(t *testing.T, repoName string, specs []multiSkillSpec) testutil.Repo {
 	t.Helper()
 
-	root := t.TempDir()
-	repoPath := filepath.Join(root, repoName)
+	repoSpecs := make([]testutil.SkillSpec, 0, len(specs))
 	for _, spec := range specs {
-		writeSkillDir(t, filepath.Join(repoPath, spec.Path), spec.Name)
+		repoSpecs = append(repoSpecs, testutil.SkillSpec{Path: spec.Path, Name: spec.Name})
 	}
-
-	runGitTest(t, root, "init", repoPath)
-	runGitTest(t, repoPath, "add", ".")
-	runGitTest(t, repoPath, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "initial")
-	return repoPath
-}
-
-func writeSkillDir(t *testing.T, dir string, skillName string) {
-	t.Helper()
-
-	if err := os.MkdirAll(filepath.Join(dir, "tools"), 0o755); err != nil {
-		t.Fatalf("MkdirAll() error = %v", err)
-	}
-
-	skillDoc := `---
-name: ` + skillName + `
-description: Test skill for rollback behavior.
----
-
-# ` + skillName + `
-`
-	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(skillDoc), 0o644); err != nil {
-		t.Fatalf("WriteFile(SKILL.md) error = %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "tools", "helper.sh"), []byte("echo helper\n"), 0o755); err != nil {
-		t.Fatalf("WriteFile(helper.sh) error = %v", err)
-	}
-}
-
-func runGitTest(t *testing.T, dir string, args ...string) {
-	t.Helper()
-
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %v error = %v\n%s", args, err, string(output))
-	}
+	return testutil.NewMultiSkillRepo(t, repoName, repoSpecs)
 }

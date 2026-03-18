@@ -334,7 +334,7 @@ func TestInstallGlobalRestoresHomeSymlink(t *testing.T) {
 	}
 }
 
-func TestInstallGlobalRejectsRelativeLocalSourceInManifest(t *testing.T) {
+func TestInstallRejectsLocalFilesystemSourceInManifest(t *testing.T) {
 	t.Parallel()
 
 	projectDir := t.TempDir()
@@ -366,8 +366,8 @@ func TestInstallGlobalRejectsRelativeLocalSourceInManifest(t *testing.T) {
 	if err == nil {
 		t.Fatal("Execute() error = nil, want relative-source error")
 	}
-	if !strings.Contains(err.Error(), `relative local git source "../repo-map" is not allowed in global scope`) {
-		t.Fatalf("Execute() error = %v, want relative-source error", err)
+	if !strings.Contains(err.Error(), "local filesystem git sources are not supported") {
+		t.Fatalf("Execute() error = %v, want local-source rejection", err)
 	}
 }
 

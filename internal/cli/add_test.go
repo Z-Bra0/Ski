@@ -7,12 +7,16 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"ski/internal/lockfile"
 	"ski/internal/manifest"
 	"ski/internal/source"
+	"ski/internal/testutil"
 )
+
+var repoPathByURL sync.Map
 
 func TestAddFetchesWritesLockfileAndLinksTargets(t *testing.T) {
 	t.Parallel()
@@ -269,7 +273,7 @@ func TestAddSupportsEscapedRepoPathContainingDoubleHash(t *testing.T) {
 	}
 }
 
-func TestAddSupportsBareRemoteFileURL(t *testing.T) {
+func TestAddSupportsBareRemoteURL(t *testing.T) {
 	t.Parallel()
 
 	repoPath, _ := createGitRepo(t, "repo-map", "repo-map")
@@ -285,14 +289,13 @@ func TestAddSupportsBareRemoteFileURL(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	fileURL := "file://" + repoPath
 	cmd := NewRootCmd(Options{
 		Getwd:      func() (string, error) { return projectDir, nil },
 		GetHomeDir: func() (string, error) { return homeDir, nil },
 		Stdout:     &bytes.Buffer{},
 		Stderr:     &bytes.Buffer{},
 	})
-	cmd.SetArgs([]string{"add", fileURL})
+	cmd.SetArgs([]string{"add", repoPath})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute() error = %v", err)
@@ -302,7 +305,7 @@ func TestAddSupportsBareRemoteFileURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile() error = %v", err)
 	}
-	wantSource := source.Git{URL: fileURL}.String()
+	wantSource := source.Git{URL: repoPath}.String()
 	if len(doc.Skills) != 1 || doc.Skills[0].Source != wantSource || doc.Skills[0].UpstreamSkill != "repo-map" {
 		t.Fatalf("skills = %#v, want source %q with upstream skill repo-map", doc.Skills, wantSource)
 	}
@@ -414,16 +417,13 @@ func TestAddGlobalWritesGlobalStateAndLinksToHome(t *testing.T) {
 	}
 }
 
-func TestAddGlobalCanonicalizesRelativeLocalSource(t *testing.T) {
+func TestAddRejectsLocalFilesystemSource(t *testing.T) {
 	t.Parallel()
 
 	repoPath, _ := createGitRepo(t, "repo-map", "repo-map")
-	projectDir := filepath.Join(filepath.Dir(repoPath), "work")
+	localRepoPath := repoPathForURL(t, repoPath)
+	projectDir := t.TempDir()
 	homeDir := t.TempDir()
-
-	if err := os.MkdirAll(projectDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll() error = %v", err)
-	}
 
 	globalManifestPath := manifest.GlobalPath(homeDir)
 	if err := os.MkdirAll(filepath.Dir(globalManifestPath), 0o755); err != nil {
@@ -443,19 +443,14 @@ func TestAddGlobalCanonicalizesRelativeLocalSource(t *testing.T) {
 		Stdout:     &bytes.Buffer{},
 		Stderr:     &bytes.Buffer{},
 	})
-	cmd.SetArgs([]string{"add", "-g", "git:../repo-map"})
+	cmd.SetArgs([]string{"add", "-g", "git:" + localRepoPath})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute() error = %v", err)
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want local-source rejection")
 	}
-
-	doc, err := manifest.ReadFile(globalManifestPath)
-	if err != nil {
-		t.Fatalf("ReadFile(manifest) error = %v", err)
-	}
-	wantSource := source.Git{URL: repoPath}.String()
-	if len(doc.Skills) != 1 || doc.Skills[0].Source != wantSource || doc.Skills[0].UpstreamSkill != "repo-map" {
-		t.Fatalf("skills = %#v, want source %q with upstream skill repo-map", doc.Skills, wantSource)
+	if !strings.Contains(err.Error(), "local filesystem git sources are not supported") {
+		t.Fatalf("Execute() error = %v, want local-source rejection", err)
 	}
 }
 
@@ -503,7 +498,7 @@ func TestAddRejectsInvalidSource(t *testing.T) {
 	if err == nil {
 		t.Fatal("Execute() error = nil, want error")
 	}
-	if !strings.Contains(err.Error(), "expected git:<url>[@ref]") || !strings.Contains(err.Error(), "bare remote URL") {
+	if !strings.Contains(err.Error(), "expected a remote git source") {
 		t.Fatalf("Execute() error = %v, want git source error", err)
 	}
 }
@@ -625,17 +620,7 @@ func TestAddRejectsInvalidSkillRepository(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	repoRoot := t.TempDir()
-	repoPath := filepath.Join(repoRoot, "repo-map")
-	if err := os.MkdirAll(repoPath, 0o755); err != nil {
-		t.Fatalf("MkdirAll() error = %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(repoPath, "README.md"), []byte("# not a skill\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile(README.md) error = %v", err)
-	}
-	runGit(t, repoRoot, "init", repoPath)
-	runGit(t, repoPath, "add", ".")
-	runGit(t, repoPath, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "initial")
+	repo := testutil.NewPlainRepo(t, "repo-map")
 
 	cmd := NewRootCmd(Options{
 		Getwd:      func() (string, error) { return projectDir, nil },
@@ -643,7 +628,7 @@ func TestAddRejectsInvalidSkillRepository(t *testing.T) {
 		Stdout:     &bytes.Buffer{},
 		Stderr:     &bytes.Buffer{},
 	})
-	cmd.SetArgs([]string{"add", "git:" + repoPath})
+	cmd.SetArgs([]string{"add", "git:" + repo.URL})
 
 	err := cmd.Execute()
 	if err == nil {
@@ -936,7 +921,6 @@ func TestAddMultiSkillRepoPreservesBareURLInNonTTYGuidance(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	fileURL := "file://" + repoPath
 	cmd := NewRootCmd(Options{
 		Getwd:      func() (string, error) { return projectDir, nil },
 		GetHomeDir: func() (string, error) { return homeDir, nil },
@@ -944,13 +928,13 @@ func TestAddMultiSkillRepoPreservesBareURLInNonTTYGuidance(t *testing.T) {
 		Stderr:     &bytes.Buffer{},
 		IsTTY:      func() bool { return false },
 	})
-	cmd.SetArgs([]string{"add", fileURL})
+	cmd.SetArgs([]string{"add", repoPath})
 
 	err := cmd.Execute()
 	if err == nil {
 		t.Fatal("Execute() error = nil, want explicit-selection guidance")
 	}
-	if !strings.Contains(err.Error(), fileURL) || !strings.Contains(err.Error(), "--skill alpha-skill") || !strings.Contains(err.Error(), "--skill beta-skill") {
+	if !strings.Contains(err.Error(), repoPath) || !strings.Contains(err.Error(), "--skill alpha-skill") || !strings.Contains(err.Error(), "--skill beta-skill") {
 		t.Fatalf("Execute() error = %v, want bare-URL guidance", err)
 	}
 }
@@ -1028,17 +1012,9 @@ func TestAddMultiSkillRepoPromptsForSelectionOnTTY(t *testing.T) {
 func createGitRepo(t *testing.T, repoName string, skillName string) (string, string) {
 	t.Helper()
 
-	root := t.TempDir()
-	repoPath := filepath.Join(root, repoName)
-	writeSkillDir(t, repoPath, skillName)
-
-	runGit(t, root, "init", repoPath)
-	runGit(t, repoPath, "add", ".")
-	runGit(t, repoPath, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "initial")
-	runGit(t, repoPath, "tag", "v1.0.0")
-
-	commit := runGitOutput(t, repoPath, "rev-parse", "HEAD")
-	return repoPath, strings.TrimSpace(commit)
+	repo := testutil.NewSkillRepo(t, repoName, skillName)
+	repoPathByURL.Store(repo.URL, repo.Path)
+	return repo.URL, repo.Commit
 }
 
 type multiSkillSpec struct {
@@ -1049,19 +1025,13 @@ type multiSkillSpec struct {
 func createMultiSkillRepo(t *testing.T, repoName string, specs []multiSkillSpec) (string, string) {
 	t.Helper()
 
-	root := t.TempDir()
-	repoPath := filepath.Join(root, repoName)
+	repoSpecs := make([]testutil.SkillSpec, 0, len(specs))
 	for _, spec := range specs {
-		writeSkillDir(t, filepath.Join(repoPath, spec.Path), spec.Name)
+		repoSpecs = append(repoSpecs, testutil.SkillSpec{Path: spec.Path, Name: spec.Name})
 	}
-
-	runGit(t, root, "init", repoPath)
-	runGit(t, repoPath, "add", ".")
-	runGit(t, repoPath, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "initial")
-	runGit(t, repoPath, "tag", "v1.0.0")
-
-	commit := runGitOutput(t, repoPath, "rev-parse", "HEAD")
-	return repoPath, strings.TrimSpace(commit)
+	repo := testutil.NewMultiSkillRepo(t, repoName, repoSpecs)
+	repoPathByURL.Store(repo.URL, repo.Path)
+	return repo.URL, repo.Commit
 }
 
 func writeSkillDir(t *testing.T, dir string, skillName string) {
@@ -1104,4 +1074,14 @@ func runGitOutput(t *testing.T, dir string, args ...string) string {
 		t.Fatalf("git %v error = %v\n%s", args, err, string(output))
 	}
 	return string(output)
+}
+
+func repoPathForURL(t *testing.T, repoURL string) string {
+	t.Helper()
+
+	path, ok := repoPathByURL.Load(repoURL)
+	if !ok {
+		t.Fatalf("repo path not found for url %q", repoURL)
+	}
+	return path.(string)
 }

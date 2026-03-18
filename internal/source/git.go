@@ -45,7 +45,7 @@ func ParseGit(raw string) (Git, error) {
 	raw = strings.TrimSpace(raw)
 	spec, ok := normalizeGitInput(raw)
 	if !ok {
-		return Git{}, fmt.Errorf("unsupported source %q: expected git:<url>[@ref][##skill[,skill...]] or a bare remote URL", raw)
+		return Git{}, fmt.Errorf("unsupported source %q: expected a remote git source like git:https://host/repo.git or https://host/repo.git", raw)
 	}
 	if spec == "" {
 		return Git{}, fmt.Errorf("invalid git source %q: missing url", raw)
@@ -69,6 +69,9 @@ func ParseGit(raw string) (Git, error) {
 
 	gitURL = unescapeGitComponent(gitURL)
 	ref = unescapeGitComponent(ref)
+	if !isSupportedRemoteGitURL(gitURL) {
+		return Git{}, fmt.Errorf("unsupported source %q: local filesystem git sources are not supported", raw)
+	}
 
 	skills, err := parseSkillSelectors(selectors)
 	if err != nil {
@@ -80,22 +83,35 @@ func ParseGit(raw string) (Git, error) {
 
 func normalizeGitInput(raw string) (string, bool) {
 	switch {
-	case strings.HasPrefix(raw, gitPrefix):
-		return strings.TrimSpace(strings.TrimPrefix(raw, gitPrefix)), true
+	case strings.HasPrefix(raw, "file://"):
+		return raw, true
 	case isBareRemoteGitURL(raw):
 		return raw, true
+	case strings.HasPrefix(raw, gitPrefix):
+		return strings.TrimSpace(strings.TrimPrefix(raw, gitPrefix)), true
 	default:
 		return "", false
 	}
 }
 
 func isBareRemoteGitURL(raw string) bool {
-	for _, prefix := range []string{"https://", "http://", "ssh://", "git://", "file://"} {
+	for _, prefix := range []string{"https://", "http://", "ssh://", "git://"} {
 		if strings.HasPrefix(raw, prefix) {
 			return true
 		}
 	}
 	return false
+}
+
+func isSupportedRemoteGitURL(raw string) bool {
+	if isBareRemoteGitURL(raw) {
+		return true
+	}
+	if strings.Contains(raw, "://") {
+		return false
+	}
+	hostSep := strings.Index(raw, ":")
+	return hostSep >= 0 && !strings.Contains(raw[:hostSep], "/")
 }
 
 // String returns the canonical git: representation for the source.
@@ -173,18 +189,7 @@ func (g Git) pathForName() string {
 
 // IsRemote reports whether the source URL refers to a remote git endpoint.
 func (g Git) IsRemote() bool {
-	if strings.Contains(g.URL, "://") {
-		return true
-	}
-	if hostSep := strings.Index(g.URL, ":"); hostSep >= 0 && !strings.Contains(g.URL[:hostSep], "/") {
-		return true
-	}
-	return false
-}
-
-// IsLocalPath reports whether the source URL should be resolved as a local path.
-func (g Git) IsLocalPath() bool {
-	return !g.IsRemote()
+	return isSupportedRemoteGitURL(g.URL)
 }
 
 // ResolveGit resolves the source ref to a concrete commit SHA.

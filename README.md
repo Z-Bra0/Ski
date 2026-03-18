@@ -66,7 +66,7 @@ ski remove [-g] <skill>
 
 - Use `ski` only with skill repositories you have verified and trust. Review the upstream repo and `SKILL.md` before `add`, `install`, or `update`.
 - `ski add` prompts when a repo contains multiple skills. In non-interactive mode, use `--skill` or `--all`.
-- URL-form git sources may omit the `git:` prefix, but plain local filesystem paths still require it, for example `git:/tmp/repo-map`.
+- Supported sources are remote Git endpoints. You can use `git:https://...` or omit the `git:` prefix for URL-form sources such as `https://...`, `ssh://...`, and `git://...`.
 - Local targets write into the project. `-g` uses `~/.ski/global.toml` and global agent directories instead.
 - Custom target folders use `dir:`. For example: `dir:./agent-skills/claude`.
 

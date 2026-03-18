@@ -96,62 +96,11 @@ func ensureParentDir(path string) error {
 }
 
 func (s Service) prepareAddSource(rawSource string) (source.Git, error) {
-	src, err := source.ParseGit(rawSource)
-	if err != nil {
-		return source.Git{}, err
-	}
-	if !s.Global {
-		return src, nil
-	}
-
-	return s.canonicalizeGlobalAddSource(src)
-}
-
-func (s Service) canonicalizeGlobalAddSource(src source.Git) (source.Git, error) {
-	if !src.IsLocalPath() {
-		return src, nil
-	}
-
-	url, err := canonicalizeGlobalLocalPath(src.URL, s.ProjectDir, s.HomeDir, true)
-	if err != nil {
-		return source.Git{}, fmt.Errorf("global git source %q: %w", src.URL, err)
-	}
-	src.URL = url
-	return src, nil
+	return source.ParseGit(rawSource)
 }
 
 func (s Service) loadSourceForScope(rawSource string) (source.Git, error) {
-	src, err := source.ParseGit(rawSource)
-	if err != nil {
-		return source.Git{}, err
-	}
-	if !s.Global || !src.IsLocalPath() {
-		return src, nil
-	}
-
-	url, err := canonicalizeGlobalLocalPath(src.URL, s.ProjectDir, s.HomeDir, false)
-	if err != nil {
-		return source.Git{}, err
-	}
-	src.URL = url
-	return src, nil
-}
-
-func canonicalizeGlobalLocalPath(raw string, cwd string, homeDir string, allowRelative bool) (string, error) {
-	switch {
-	case raw == "~":
-		return homeDir, nil
-	case strings.HasPrefix(raw, "~/"):
-		return filepath.Join(homeDir, raw[2:]), nil
-	case strings.HasPrefix(raw, "~\\"):
-		return filepath.Join(homeDir, raw[2:]), nil
-	case filepath.IsAbs(raw):
-		return filepath.Clean(raw), nil
-	case allowRelative:
-		return filepath.Abs(filepath.Join(cwd, raw))
-	default:
-		return "", fmt.Errorf("relative local git source %q is not allowed in global scope; use an absolute path", raw)
-	}
+	return source.ParseGit(rawSource)
 }
 
 // CheckInitAvailable reports whether the active-scope manifest can be created.

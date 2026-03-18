@@ -37,7 +37,7 @@ func TestUpdateAdvancesLockfileAndSymlink(t *testing.T) {
 		t.Fatalf("add Execute() error = %v", err)
 	}
 
-	newCommit := advanceGitRepo(t, repoPath, "repo-map", "second")
+	newCommit := advanceGitRepo(t, repoPathForURL(t, repoPath), "repo-map", "second")
 
 	var stdout bytes.Buffer
 	updateCmd := NewRootCmd(Options{
@@ -103,7 +103,7 @@ func TestUpdateGlobalAdvancesHomeLockfileAndSymlink(t *testing.T) {
 		t.Fatalf("add Execute() error = %v", err)
 	}
 
-	newCommit := advanceGitRepo(t, repoPath, "repo-map", "second")
+	newCommit := advanceGitRepo(t, repoPathForURL(t, repoPath), "repo-map", "second")
 
 	var stdout bytes.Buffer
 	updateCmd := NewRootCmd(Options{
@@ -165,7 +165,7 @@ func TestUpdateCheckReportsWithoutMutating(t *testing.T) {
 		t.Fatalf("add Execute() error = %v", err)
 	}
 
-	newCommit := advanceGitRepo(t, repoPath, "repo-map", "second")
+	newCommit := advanceGitRepo(t, repoPathForURL(t, repoPath), "repo-map", "second")
 
 	var stdout bytes.Buffer
 	checkCmd := NewRootCmd(Options{
@@ -232,7 +232,7 @@ func TestUpdateSpecificSkillOnly(t *testing.T) {
 		t.Fatalf("add repoB Execute() error = %v", err)
 	}
 
-	newCommitA := advanceGitRepo(t, repoA, "repo-map", "second")
+	newCommitA := advanceGitRepo(t, repoPathForURL(t, repoA), "repo-map", "second")
 
 	updateCmd := NewRootCmd(Options{
 		Getwd:      func() (string, error) { return projectDir, nil },
@@ -352,7 +352,7 @@ func TestUpdateSkipsCommitPinnedSkill(t *testing.T) {
 		t.Fatalf("install Execute() error = %v", err)
 	}
 
-	advanceGitRepo(t, repoPath, "repo-map", "second")
+	advanceGitRepo(t, repoPathForURL(t, repoPath), "repo-map", "second")
 
 	var checkOut bytes.Buffer
 	checkCmd := NewRootCmd(Options{
@@ -402,7 +402,7 @@ func TestUpdateTracksHexTagRefs(t *testing.T) {
 	homeDir := t.TempDir()
 	const hexTag = "deadbeef"
 
-	runGit(t, repoPath, "tag", hexTag)
+	runGit(t, repoPathForURL(t, repoPath), "tag", hexTag)
 
 	if err := manifest.WriteFile(filepath.Join(projectDir, manifest.FileName), manifest.Manifest{
 		Version: 1,
@@ -425,8 +425,8 @@ func TestUpdateTracksHexTagRefs(t *testing.T) {
 		t.Fatalf("install Execute() error = %v", err)
 	}
 
-	newCommit := advanceGitRepo(t, repoPath, "repo-map", "second")
-	runGit(t, repoPath, "tag", "-f", hexTag)
+	newCommit := advanceGitRepo(t, repoPathForURL(t, repoPath), "repo-map", "second")
+	runGit(t, repoPathForURL(t, repoPath), "tag", "-f", hexTag)
 
 	var checkOut bytes.Buffer
 	checkCmd := NewRootCmd(Options{
