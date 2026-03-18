@@ -22,6 +22,20 @@ Install skills from Git repositories into agent platforms such as Claude, Codex,
 
 ---
 
+## Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Z-Bra0/Ski/main/scripts/install.sh | sh
+```
+
+Install a specific release:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Z-Bra0/Ski/main/scripts/install.sh | sh -s -- --version v0.1.0
+```
+
+---
+
 ## Build
 
 ```bash
