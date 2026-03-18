@@ -38,9 +38,9 @@ assert-release-version:
 
 release: assert-release-version $(RELEASE_PLATFORMS:%=release-%)
 	@if command -v shasum >/dev/null 2>&1; then \
-		shasum -a 256 $(RELEASE_ARCHIVES) > $(CHECKSUMS_FILE); \
+		cd dist && shasum -a 256 $(notdir $(RELEASE_ARCHIVES)) > $(notdir $(CHECKSUMS_FILE)); \
 	elif command -v sha256sum >/dev/null 2>&1; then \
-		sha256sum $(RELEASE_ARCHIVES) > $(CHECKSUMS_FILE); \
+		cd dist && sha256sum $(notdir $(RELEASE_ARCHIVES)) > $(notdir $(CHECKSUMS_FILE)); \
 	else \
 		echo "shasum or sha256sum is required to generate release checksums"; \
 		exit 1; \
