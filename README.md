@@ -1,8 +1,10 @@
 # ski
 
-A package manager for AI agent skills.
+Managing AI agent skills across tools is still manual, duplicated, and hard to reproduce.
 
-Install skills from Git repositories into agent platforms such as Claude, Codex, Cursor, and OpenClaw with a manifest, lockfile, and shared store.
+Teams copy skill folders into `.claude/skills`, `.codex/skills`, and other agent directories by hand, then lose track of which repo, tag, or commit each project is actually using.
+
+`ski` turns that into a package-manager workflow for agent skills. Install skills from Git into Claude, Codex, Cursor, and OpenClaw with a manifest, lockfile, and shared store.
 
 ---
 
@@ -43,6 +45,30 @@ ski init
 ski add https://github.com/org/repo-map.git
 ski install
 ```
+
+---
+
+## Examples
+
+Share one `repo-map` skill across Claude and Codex:
+
+```bash
+ski init --target claude --target codex
+ski add https://github.com/org/repo-map.git
+ski install
+```
+
+This keeps one stored copy of the skill and links it into both `.claude/skills` and `.codex/skills`.
+
+Pin a team audit skill to a specific commit:
+
+```bash
+ski init --target claude
+ski add git:https://github.com/acme/team-audit-skill.git@9f3c2ab
+ski install
+```
+
+This makes the project reproducible because the manifest and lockfile keep the selected source and resolved revision explicit.
 
 ---
 
