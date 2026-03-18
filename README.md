@@ -98,6 +98,12 @@ ski version
 
 ---
 
+## Author
+
+[Z-Bra](https://x.com/Z_Bra0)
+
+---
+
 ## License
 
 GPL-3.0. See [LICENSE](LICENSE).
