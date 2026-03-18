@@ -36,6 +36,16 @@ curl -fsSL https://raw.githubusercontent.com/Z-Bra0/Ski/master/scripts/install.s
 
 ---
 
+## Quick Start
+
+```bash
+ski init
+ski add https://github.com/org/repo-map.git
+ski install
+```
+
+---
+
 ## Build
 
 ```bash
@@ -49,16 +59,6 @@ make release VERSION=0.1.1
 
 ```bash
 make test
-```
-
----
-
-## Quick Start
-
-```bash
-ski init
-ski add https://github.com/org/repo-map.git
-ski install
 ```
 
 ---
