@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"ski/internal/buildinfo"
+	"github.com/Z-Bra0/Ski/internal/buildinfo"
 )
 
 func newVersionCmd() *cobra.Command {

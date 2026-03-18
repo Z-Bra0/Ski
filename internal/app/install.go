@@ -6,9 +6,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"ski/internal/lockfile"
-	"ski/internal/manifest"
-	"ski/internal/store"
+	"github.com/Z-Bra0/Ski/internal/lockfile"
+	"github.com/Z-Bra0/Ski/internal/manifest"
+	"github.com/Z-Bra0/Ski/internal/store"
 )
 
 type plannedInstall struct {

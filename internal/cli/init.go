@@ -6,9 +6,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"ski/internal/app"
-	"ski/internal/manifest"
-	"ski/internal/target"
+	"github.com/Z-Bra0/Ski/internal/app"
+	"github.com/Z-Bra0/Ski/internal/manifest"
+	"github.com/Z-Bra0/Ski/internal/target"
 )
 
 var initBuiltInTargets = []string{"claude", "codex", "cursor", "openclaw"}

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"ski/internal/cli"
+	"github.com/Z-Bra0/Ski/internal/cli"
 )
 
 func main() {

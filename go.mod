@@ -1,4 +1,4 @@
-module ski
+module github.com/Z-Bra0/Ski
 
 go 1.23.4
 

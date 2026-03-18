@@ -13,8 +13,8 @@ import (
 	"strings"
 	"syscall"
 
-	"ski/internal/skill"
-	"ski/internal/source"
+	"github.com/Z-Bra0/Ski/internal/skill"
+	"github.com/Z-Bra0/Ski/internal/source"
 )
 
 var renameDir = os.Rename

@@ -8,7 +8,7 @@ import (
 	"syscall"
 	"testing"
 
-	"ski/internal/source"
+	"github.com/Z-Bra0/Ski/internal/source"
 )
 
 func TestMoveDirIntoStoreFallsBackOnCrossDeviceRename(t *testing.T) {

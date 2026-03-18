@@ -10,10 +10,10 @@ import (
 	"sync"
 	"testing"
 
-	"ski/internal/lockfile"
-	"ski/internal/manifest"
-	"ski/internal/source"
-	"ski/internal/testutil"
+	"github.com/Z-Bra0/Ski/internal/lockfile"
+	"github.com/Z-Bra0/Ski/internal/manifest"
+	"github.com/Z-Bra0/Ski/internal/source"
+	"github.com/Z-Bra0/Ski/internal/testutil"
 )
 
 var repoPathByURL sync.Map

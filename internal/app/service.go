@@ -8,11 +8,11 @@ import (
 	"slices"
 	"strings"
 
-	"ski/internal/lockfile"
-	"ski/internal/manifest"
-	"ski/internal/source"
-	"ski/internal/store"
-	"ski/internal/target"
+	"github.com/Z-Bra0/Ski/internal/lockfile"
+	"github.com/Z-Bra0/Ski/internal/manifest"
+	"github.com/Z-Bra0/Ski/internal/source"
+	"github.com/Z-Bra0/Ski/internal/store"
+	"github.com/Z-Bra0/Ski/internal/target"
 )
 
 // Service orchestrates ski operations for a single project or the global scope.

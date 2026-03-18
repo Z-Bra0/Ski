@@ -5,8 +5,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"ski/internal/app"
-	"ski/internal/manifest"
+	"github.com/Z-Bra0/Ski/internal/app"
+	"github.com/Z-Bra0/Ski/internal/manifest"
 )
 
 func newService(cmd *cobra.Command, opts Options) (app.Service, error) {

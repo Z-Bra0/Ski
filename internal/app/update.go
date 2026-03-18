@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 	"slices"
 
-	"ski/internal/lockfile"
-	"ski/internal/manifest"
-	"ski/internal/source"
-	"ski/internal/store"
+	"github.com/Z-Bra0/Ski/internal/lockfile"
+	"github.com/Z-Bra0/Ski/internal/manifest"
+	"github.com/Z-Bra0/Ski/internal/source"
+	"github.com/Z-Bra0/Ski/internal/store"
 )
 
 // UpdateInfo reports the current and latest commit for one skill update check.

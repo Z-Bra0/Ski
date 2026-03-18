@@ -3,7 +3,7 @@ package app
 import (
 	"fmt"
 
-	"ski/internal/source"
+	"github.com/Z-Bra0/Ski/internal/source"
 )
 
 type skillSourceRef struct {

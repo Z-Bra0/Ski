@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"slices"
 
-	"ski/internal/lockfile"
-	"ski/internal/manifest"
-	"ski/internal/store"
+	"github.com/Z-Bra0/Ski/internal/lockfile"
+	"github.com/Z-Bra0/Ski/internal/manifest"
+	"github.com/Z-Bra0/Ski/internal/store"
 )
 
 // DoctorFinding describes one inconsistency found by Service.Doctor.

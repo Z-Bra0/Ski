@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"ski/internal/manifest"
+	"github.com/Z-Bra0/Ski/internal/manifest"
 )
 
 func TestListGlobalShowsHomeScopedSkills(t *testing.T) {

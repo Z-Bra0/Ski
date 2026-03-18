@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"ski/internal/target"
+	"github.com/Z-Bra0/Ski/internal/target"
 )
 
 // claudeLink returns the expected symlink path for the "claude" target.

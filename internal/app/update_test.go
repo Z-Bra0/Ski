@@ -3,8 +3,8 @@ package app
 import (
 	"testing"
 
-	"ski/internal/source"
-	"ski/internal/testutil"
+	"github.com/Z-Bra0/Ski/internal/source"
+	"github.com/Z-Bra0/Ski/internal/testutil"
 )
 
 func TestResolveUpdateCommitTreatsMissingPinnedCommitAsPinned(t *testing.T) {

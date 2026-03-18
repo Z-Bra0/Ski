@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"ski/internal/lockfile"
-	"ski/internal/manifest"
+	"github.com/Z-Bra0/Ski/internal/lockfile"
+	"github.com/Z-Bra0/Ski/internal/manifest"
 )
 
 func TestInstallFromLockfile(t *testing.T) {

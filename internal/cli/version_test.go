@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"ski/internal/buildinfo"
+	"github.com/Z-Bra0/Ski/internal/buildinfo"
 )
 
 func TestVersionPrintsBuildVersion(t *testing.T) {

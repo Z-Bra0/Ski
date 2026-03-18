@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"ski/internal/testutil"
+	"github.com/Z-Bra0/Ski/internal/testutil"
 )
 
 func TestParseGit(t *testing.T) {

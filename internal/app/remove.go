@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"ski/internal/lockfile"
-	"ski/internal/manifest"
+	"github.com/Z-Bra0/Ski/internal/lockfile"
+	"github.com/Z-Bra0/Ski/internal/manifest"
 )
 
 // Remove deletes a skill from the active manifest, lockfile, and target symlinks.

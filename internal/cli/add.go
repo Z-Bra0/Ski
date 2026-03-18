@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"ski/internal/app"
-	"ski/internal/source"
+	"github.com/Z-Bra0/Ski/internal/app"
+	"github.com/Z-Bra0/Ski/internal/source"
 )
 
 func newAddCmd(opts Options) *cobra.Command {

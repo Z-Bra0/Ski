@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"ski/internal/lockfile"
-	"ski/internal/manifest"
-	"ski/internal/target"
-	"ski/internal/testutil"
+	"github.com/Z-Bra0/Ski/internal/lockfile"
+	"github.com/Z-Bra0/Ski/internal/manifest"
+	"github.com/Z-Bra0/Ski/internal/target"
+	"github.com/Z-Bra0/Ski/internal/testutil"
 )
 
 func TestAddSelectedRollsBackAfterLinkFailure(t *testing.T) {
