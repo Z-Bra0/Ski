@@ -31,7 +31,7 @@ curl -fsSL https://raw.githubusercontent.com/Z-Bra0/Ski/master/scripts/install.s
 Install a specific release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Z-Bra0/Ski/master/scripts/install.sh | sh -s -- --version v0.1.0
+curl -fsSL https://raw.githubusercontent.com/Z-Bra0/Ski/master/scripts/install.sh | sh -s -- --version v0.1.1
 ```
 
 ---
@@ -40,7 +40,7 @@ curl -fsSL https://raw.githubusercontent.com/Z-Bra0/Ski/master/scripts/install.s
 
 ```bash
 make build                     # local dev build; `ski version` prints `dev`
-make release VERSION=0.1.0
+make release VERSION=0.1.1
 ```
 
 ---
