@@ -8,17 +8,17 @@ Install skills from Git repositories into agent platforms such as Claude, Codex,
 
 ## Status
 
-```bash
-Implemented in v1:
-- git: sources
+- git repositories as skill sources
 - local and global scope
-- init, add, install, remove, update, list, doctor
-```
+- `init`, `add`, `install`, `remove`, `update`, `list`, and `doctor`
 
-Deferred:
-- github: shorthand
-- info, search, scan, prune
-- registry-style sources
+---
+
+## Limitations
+
+- Git-only sources
+- Trust is manual
+- No Windows support
 
 ---
 
@@ -26,6 +26,13 @@ Deferred:
 
 ```bash
 make build
+```
+
+---
+
+## Test
+
+```bash
 make test
 ```
 
@@ -34,47 +41,34 @@ make test
 ## Quick Start
 
 ```bash
-ski init                         # create ski.toml and pick targets on a TTY
+ski init
 ski add https://github.com/org/repo-map.git
-ski list                         # show installed skills
-ski doctor                       # verify links and lock state
-
-# another machine or fresh clone:
-ski install                      # restore from ski.toml + ski.lock.json
+ski install
 ```
-
-Use `ski` only with skill repositories you have verified and trust. Before `ski add`, `ski install`, or `ski update`, review the upstream repo and `SKILL.md`, and re-check the diff before upgrading to a newer ref or commit.
-
-If a repo contains multiple skills, `ski add` prompts in a terminal. In non-interactive mode, use `ski add <source> --skill skill-a --skill skill-b` or `ski add <source> --all`. Legacy `##skill-a,skill-b` source selectors are still accepted during migration.
-
-If the repo URL or local path contains a literal `@`, `#`, or `\`, escape it in the source string as `\@`, `\#`, or `\\`. Example: `git:/tmp/skill\#\#pack`.
-
-URL-form git sources may omit the `git:` prefix, including `https://...`, `ssh://...`, `git://...`, and `file://...`. Plain local filesystem paths still require it, for example `git:/tmp/repo-map`.
-
-`targets = ["claude"]` in `ski.toml` means project-local installation into `./.claude/skills/`. Use `-g` to operate on `~/.ski/global.toml` / `~/.ski/global.lock.json` and link built-in targets into user-global agent directories such as `~/.claude/skills/`.
-
-Custom target folders use a `dir:` prefix. In local scope, `dir:./agent-skills/claude` resolves relative to the repo root. In global scope, `dir:agent-skills/claude` resolves relative to the user home directory, and `~` expansion is allowed.
-
-On a TTY, `ski init` prompts for built-in targets. For custom target directories, edit `ski.toml` manually or use `ski init --target ...` in scripts and non-interactive environments.
 
 ---
 
 ## Commands
 
 ```bash
-ski init [-g]                    # create the local or global manifest
-ski init [-g] --target x         # set initial targets without prompting
-ski add [-g] <source>            # add + fetch + link
-ski add [-g] <source> --skill x  # add selected upstream skill(s) from one repo
-ski add [-g] <source> --all      # add all discovered skills from one repo
-ski add [-g] <source> --name x   # alias one selected skill locally
-ski install [-g]                 # restore from manifest + lockfile
-ski remove [-g] <skill>          # remove one skill from the active scope
-ski update [-g] [skill]          # update all skills or one skill
-ski update [-g] --check [skill]  # report available updates only
-ski list [-g]                    # list declared skills
-ski doctor [-g]                  # check links and lock/store consistency
+ski init [-g]
+ski add [-g] <source>
+ski install [-g]
+ski list [-g]
+ski doctor [-g]
+ski update [-g] [skill]
+ski remove [-g] <skill>
 ```
+
+---
+
+## Usage Notes
+
+- Use `ski` only with skill repositories you have verified and trust. Review the upstream repo and `SKILL.md` before `add`, `install`, or `update`.
+- `ski add` prompts when a repo contains multiple skills. In non-interactive mode, use `--skill` or `--all`.
+- URL-form git sources may omit the `git:` prefix, but plain local filesystem paths still require it, for example `git:/tmp/repo-map`.
+- Local targets write into the project. `-g` uses `~/.ski/global.toml` and global agent directories instead.
+- Custom target folders use `dir:`. For example: `dir:./agent-skills/claude`.
 
 ---
 
@@ -83,8 +77,6 @@ ski doctor [-g]                  # check links and lock/store consistency
 - [SPEC.md](SPEC.md) — file formats, schemas, adapter interfaces
 - [ARCHITECTURE.md](ARCHITECTURE.md) — internal design and Go layout
 - [DECISIONS.md](DECISIONS.md) — design decisions and rationale
-
-MVP source support is git repositories via canonical `git:` sources or bare URL-form sources such as `https://...` and `file://...`. `github:` may be added later as a convenience alias over Git-hosted repositories.
 
 ---
 
