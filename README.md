@@ -26,6 +26,7 @@ Install skills from Git repositories into agent platforms such as Claude, Codex,
 
 ```bash
 make build
+make release VERSION=0.1.0
 ```
 
 ---
