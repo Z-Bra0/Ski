@@ -58,6 +58,7 @@ ski list [-g]
 ski doctor [-g]
 ski update [-g] [skill]
 ski remove [-g] <skill>
+ski version
 ```
 
 ---

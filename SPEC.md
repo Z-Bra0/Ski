@@ -230,6 +230,12 @@ Removes from the active manifest, removes from the active lockfile, and unlinks 
 
 Store contents are left in `~/.ski/store/`.
 
+### `ski version`
+
+Prints the CLI version embedded at build time.
+
+Development builds without an injected release version print `dev`.
+
 ---
 
 ## Source Adapter Responsibilities
