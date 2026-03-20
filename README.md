@@ -26,12 +26,6 @@ Teams copy skill folders into `.claude/skills`, `.codex/skills`, and other agent
 
 ## Install
 
-Install with the release script:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Z-Bra0/Ski/master/scripts/install.sh | sh
-```
-
 Install with Homebrew:
 
 ```bash
@@ -40,6 +34,12 @@ brew install skicli
 ```
 
 Homebrew installs the formula as `skicli`, but the command is still `ski`.
+
+Or install with the release script:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Z-Bra0/Ski/master/scripts/install.sh | sh
+```
 
 ---
 
