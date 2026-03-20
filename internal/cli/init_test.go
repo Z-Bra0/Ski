@@ -430,6 +430,33 @@ func TestInitFailsWhenManifestStatHitsUnexpectedError(t *testing.T) {
 	}
 }
 
+func TestInitDoesNotCreateManifestWhenPromptFails(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cmd := NewRootCmd(Options{
+		Getwd:  func() (string, error) { return dir, nil },
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+		IsTTY:  func() bool { return true },
+		PromptMultiSelect: func(req MultiSelectRequest) ([]string, error) {
+			return nil, errBoom("prompt canceled")
+		},
+	})
+	cmd.SetArgs([]string{"init"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want prompt error")
+	}
+	if !strings.Contains(err.Error(), "prompt canceled") {
+		t.Fatalf("Execute() error = %v, want prompt error", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, manifest.FileName)); !os.IsNotExist(statErr) {
+		t.Fatalf("manifest stat error = %v, want not exist", statErr)
+	}
+}
+
 func errBoom(label string) error {
 	return errors.New(label)
 }
