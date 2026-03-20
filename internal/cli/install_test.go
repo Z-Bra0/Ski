@@ -23,7 +23,11 @@ func TestInstallFromLockfile(t *testing.T) {
 	if err := manifest.WriteFile(filepath.Join(projectDir, manifest.FileName), manifest.Manifest{
 		Version: 1,
 		Targets: []string{"claude"},
-		Skills:  []manifest.Skill{{Name: "repo-map", Source: "git:" + repoPath + "@v1.0.0"}},
+		Skills: []manifest.Skill{{
+			Name:    "repo-map",
+			Source:  "git:" + repoPath + "@v1.0.0",
+			Version: "1.2.3",
+		}},
 	}); err != nil {
 		t.Fatalf("WriteFile(manifest) error = %v", err)
 	}
@@ -138,7 +142,11 @@ func TestInstallWithoutLockfileGeneratesOne(t *testing.T) {
 	if err := manifest.WriteFile(filepath.Join(projectDir, manifest.FileName), manifest.Manifest{
 		Version: 1,
 		Targets: []string{"claude"},
-		Skills:  []manifest.Skill{{Name: "repo-map", Source: "git:" + repoPath + "@v1.0.0"}},
+		Skills: []manifest.Skill{{
+			Name:    "repo-map",
+			Source:  "git:" + repoPath + "@v1.0.0",
+			Version: "1.2.3",
+		}},
 	}); err != nil {
 		t.Fatalf("WriteFile(manifest) error = %v", err)
 	}
@@ -161,6 +169,9 @@ func TestInstallWithoutLockfileGeneratesOne(t *testing.T) {
 	}
 	if len(lf.Skills) != 1 || lf.Skills[0].Commit != commit {
 		t.Fatalf("lockfile = %#v, want commit %q", lf.Skills, commit)
+	}
+	if lf.Skills[0].Version != "1.2.3" {
+		t.Fatalf("lockfile version = %q, want 1.2.3", lf.Skills[0].Version)
 	}
 	if !reflect.DeepEqual(lf.Skills[0].Targets, []string{"claude"}) {
 		t.Fatalf("lockfile targets = %#v, want [claude]", lf.Skills[0].Targets)
@@ -220,6 +231,80 @@ func TestInstallUsesPerSkillTargetOverrides(t *testing.T) {
 	}
 	if !reflect.DeepEqual(lf.Skills[0].Targets, []string{"codex"}) {
 		t.Fatalf("lockfile targets = %#v, want [codex]", lf.Skills[0].Targets)
+	}
+}
+
+func TestInstallRemovesStaleTargetsFromPreviousLockState(t *testing.T) {
+	t.Parallel()
+
+	repoPath, commit := createGitRepo(t, "repo-map", "repo-map")
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	if err := manifest.WriteFile(filepath.Join(projectDir, manifest.FileName), manifest.Manifest{
+		Version: 1,
+		Targets: []string{"codex"},
+		Skills:  []manifest.Skill{},
+	}); err != nil {
+		t.Fatalf("WriteFile(manifest) error = %v", err)
+	}
+
+	addCmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	addCmd.SetArgs([]string{"add", "git:" + repoPath + "@v1.0.0"})
+	if err := addCmd.Execute(); err != nil {
+		t.Fatalf("add Execute() error = %v", err)
+	}
+
+	if err := manifest.WriteFile(filepath.Join(projectDir, manifest.FileName), manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills: []manifest.Skill{
+			{
+				Name:   "repo-map",
+				Source: "git:" + repoPath + "@v1.0.0",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("WriteFile(manifest updated) error = %v", err)
+	}
+
+	installCmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	installCmd.SetArgs([]string{"install"})
+	if err := installCmd.Execute(); err != nil {
+		t.Fatalf("install Execute() error = %v", err)
+	}
+
+	claudeLink := filepath.Join(projectDir, ".claude", "skills", "repo-map")
+	targetPath, err := os.Readlink(claudeLink)
+	if err != nil {
+		t.Fatalf("Readlink(claude) error = %v", err)
+	}
+	wantStore := filepath.Join(homeDir, ".ski", "store", "git", "repo-map", commit)
+	if targetPath != wantStore {
+		t.Fatalf("claude symlink target = %q, want %q", targetPath, wantStore)
+	}
+
+	codexLink := filepath.Join(projectDir, ".codex", "skills", "repo-map")
+	if _, err := os.Lstat(codexLink); !os.IsNotExist(err) {
+		t.Fatalf("stale codex link exists = %v, want missing", err)
+	}
+
+	lf, err := lockfile.ReadFile(filepath.Join(projectDir, lockfile.FileName))
+	if err != nil {
+		t.Fatalf("ReadFile(lockfile) error = %v", err)
+	}
+	if !reflect.DeepEqual(lf.Skills[0].Targets, []string{"claude"}) {
+		t.Fatalf("lockfile targets = %#v, want [claude]", lf.Skills[0].Targets)
 	}
 }
 

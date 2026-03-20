@@ -106,18 +106,19 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 			return nil, err
 		}
 
-		lockEntry := lockfile.Skill{
-			Name:          localName,
-			Source:        canonical,
-			UpstreamSkill: selectedSkillName,
-			Commit:        stored.Commit,
-			Integrity:     stored.Integrity,
-			Targets:       effectiveTargets,
-		}
 		manifestEntry := manifest.Skill{
 			Name:          localName,
 			Source:        canonical,
 			UpstreamSkill: selectedSkillName,
+		}
+		lockEntry := lockfile.Skill{
+			Name:          localName,
+			Source:        canonical,
+			UpstreamSkill: selectedSkillName,
+			Version:       manifestEntry.Version,
+			Commit:        stored.Commit,
+			Integrity:     stored.Integrity,
+			Targets:       effectiveTargets,
 		}
 		upsertLockSkill(&nextLock, lockEntry)
 		nextDoc.Skills = append(nextDoc.Skills, manifestEntry)

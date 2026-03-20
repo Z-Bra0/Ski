@@ -218,6 +218,10 @@ If the active lockfile does not exist yet, `ski install` resolves the manifest e
 
 Lists the skills declared in the active scope, including canonical source, upstream skill, locked commit, and effective targets.
 
+### `ski info <skill>`
+
+Shows detailed state for one declared skill in the active scope, including canonical source, upstream skill, informational version, locked commit, integrity, resolved store path, and per-target link status.
+
 ### `ski doctor`
 
 Checks the active scope for broken symlinks and inconsistencies between the manifest, lockfile, store, and target directories.

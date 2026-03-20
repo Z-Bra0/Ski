@@ -12,7 +12,7 @@ Teams copy skill folders into `.claude/skills`, `.codex/skills`, and other agent
 
 - git repositories as skill sources
 - local and global scope
-- `init`, `add`, `install`, `remove`, `update`, `list`, and `doctor`
+- `init`, `add`, `install`, `remove`, `update`, `list`, `info`, and `doctor`
 
 ---
 
@@ -25,6 +25,17 @@ Teams copy skill folders into `.claude/skills`, `.codex/skills`, and other agent
 ---
 
 ## Install
+
+Install with Homebrew:
+
+```bash
+brew tap Z-Bra0/skicli
+brew install skicli
+```
+
+Homebrew installs the formula as `skicli`, but the command is still `ski`.
+
+Or install with the release script:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Z-Bra0/Ski/master/scripts/install.sh | sh
@@ -97,6 +108,7 @@ ski init [-g]
 ski add [-g] <source>
 ski install [-g]
 ski list [-g]
+ski info [-g] <skill>
 ski doctor [-g]
 ski update [-g] [skill]
 ski remove [-g] <skill>

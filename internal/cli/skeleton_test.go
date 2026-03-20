@@ -21,7 +21,7 @@ func TestRootHelpListsSkeletonCommands(t *testing.T) {
 	}
 
 	help := stdout.String()
-	for _, name := range []string{"doctor", "install", "remove", "update", "list"} {
+	for _, name := range []string{"doctor", "info", "install", "remove", "update", "list"} {
 		if !strings.Contains(help, name) {
 			t.Fatalf("help output missing %q:\n%s", name, help)
 		}

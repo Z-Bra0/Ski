@@ -114,14 +114,20 @@ func (s Service) CheckInitAvailable() error {
 	return nil
 }
 
-// Init creates a new manifest in the active scope.
+// Init creates a new default manifest in the active scope.
 func (s Service) Init() (string, error) {
+	return s.InitWithTargets(nil)
+}
+
+// InitWithTargets creates a new manifest in the active scope with the provided targets.
+func (s Service) InitWithTargets(targets []string) (string, error) {
 	path := s.manifestPath()
 	if err := s.CheckInitAvailable(); err != nil {
 		return "", err
 	}
 
 	doc := manifest.Default()
+	doc.Targets = append([]string(nil), targets...)
 	if err := ensureParentDir(path); err != nil {
 		return "", fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
 	}

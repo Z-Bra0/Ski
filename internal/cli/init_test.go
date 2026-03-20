@@ -2,6 +2,8 @@ package cli
 
 import (
 	"bytes"
+	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -249,4 +251,212 @@ func TestInitWithTargetFlagsSkipsPrompt(t *testing.T) {
 	if !reflect.DeepEqual(*doc, want) {
 		t.Fatalf("manifest = %#v, want %#v", *doc, want)
 	}
+}
+
+func TestInitRejectsTargetsThatResolveToSameDirectory(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	cmd := NewRootCmd(Options{
+		Getwd:  func() (string, error) { return dir, nil },
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+	})
+	cmd.SetArgs([]string{"init", "--target", "claude", "--target", "dir:./.claude/skills"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want duplicate-directory error")
+	}
+	if !strings.Contains(err.Error(), `targets "claude" and "dir:./.claude/skills" resolve to the same directory`) {
+		t.Fatalf("Execute() error = %v, want duplicate-directory error", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, manifest.FileName)); !os.IsNotExist(statErr) {
+		t.Fatalf("manifest stat error = %v, want not exist", statErr)
+	}
+}
+
+func TestInitGlobalRejectsTargetsThatResolveToSameDirectory(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	homeDir := t.TempDir()
+
+	cmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return dir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	cmd.SetArgs([]string{"init", "-g", "--target", "claude", "--target", "dir:~/.claude/skills"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want duplicate-directory error")
+	}
+	if !strings.Contains(err.Error(), `targets "claude" and "dir:~/.claude/skills" resolve to the same directory`) {
+		t.Fatalf("Execute() error = %v, want duplicate-directory error", err)
+	}
+	if _, statErr := os.Stat(manifest.GlobalPath(homeDir)); !os.IsNotExist(statErr) {
+		t.Fatalf("global manifest stat error = %v, want not exist", statErr)
+	}
+}
+
+func TestInitRejectsInvalidTargetSpecs(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		target  string
+		wantErr string
+	}{
+		{
+			name:    "missing custom dir path",
+			target:  "dir:",
+			wantErr: `custom target "dir:": missing directory path`,
+		},
+		{
+			name:    "escape outside project",
+			target:  "dir:../escape",
+			wantErr: `target "dir:../escape" must resolve to a subdirectory within the project root`,
+		},
+		{
+			name:    "absolute path",
+			target:  "dir:/abs/path",
+			wantErr: `custom target "dir:/abs/path" must be project-relative`,
+		},
+		{
+			name:    "home expansion outside global scope",
+			target:  "dir:~/skills",
+			wantErr: `custom target "dir:~/skills" may use ~ only in global scope`,
+		},
+		{
+			name:    "unsupported target",
+			target:  "unsupported-target",
+			wantErr: `unsupported target "unsupported-target"`,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			cmd := NewRootCmd(Options{
+				Getwd:  func() (string, error) { return dir, nil },
+				Stdout: &bytes.Buffer{},
+				Stderr: &bytes.Buffer{},
+			})
+			cmd.SetArgs([]string{"init", "--target", tc.target})
+
+			err := cmd.Execute()
+			if err == nil {
+				t.Fatal("Execute() error = nil, want validation error")
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("Execute() error = %v, want %q", err, tc.wantErr)
+			}
+			if _, statErr := os.Stat(filepath.Join(dir, manifest.FileName)); !os.IsNotExist(statErr) {
+				t.Fatalf("manifest stat error = %v, want not exist", statErr)
+			}
+		})
+	}
+}
+
+func TestInitFailsWhenWorkingDirectoryResolutionFails(t *testing.T) {
+	t.Parallel()
+
+	cmd := NewRootCmd(Options{
+		Getwd:  func() (string, error) { return "", errBoom("cwd") },
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+	})
+	cmd.SetArgs([]string{"init"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want cwd error")
+	}
+	if !strings.Contains(err.Error(), "resolve working directory: cwd") {
+		t.Fatalf("Execute() error = %v, want cwd resolution error", err)
+	}
+}
+
+func TestInitFailsWhenHomeDirectoryResolutionFails(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return dir, nil },
+		GetHomeDir: func() (string, error) { return "", errBoom("home") },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	cmd.SetArgs([]string{"init"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want home error")
+	}
+	if !strings.Contains(err.Error(), "resolve home directory: home") {
+		t.Fatalf("Execute() error = %v, want home resolution error", err)
+	}
+}
+
+func TestInitFailsWhenManifestStatHitsUnexpectedError(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	baseFile := filepath.Join(dir, "not-a-directory")
+	if err := os.WriteFile(baseFile, []byte("x"), 0o644); err != nil {
+		t.Fatalf("WriteFile(baseFile) error = %v", err)
+	}
+
+	cmd := NewRootCmd(Options{
+		Getwd:  func() (string, error) { return filepath.Join(baseFile, "child"), nil },
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+	})
+	cmd.SetArgs([]string{"init"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want stat error")
+	}
+	if !strings.Contains(err.Error(), "stat ") {
+		t.Fatalf("Execute() error = %v, want stat error", err)
+	}
+}
+
+func TestInitDoesNotCreateManifestWhenPromptFails(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cmd := NewRootCmd(Options{
+		Getwd:  func() (string, error) { return dir, nil },
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+		IsTTY:  func() bool { return true },
+		PromptMultiSelect: func(req MultiSelectRequest) ([]string, error) {
+			return nil, errBoom("prompt canceled")
+		},
+	})
+	cmd.SetArgs([]string{"init"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want prompt error")
+	}
+	if !strings.Contains(err.Error(), "prompt canceled") {
+		t.Fatalf("Execute() error = %v, want prompt error", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, manifest.FileName)); !os.IsNotExist(statErr) {
+		t.Fatalf("manifest stat error = %v, want not exist", statErr)
+	}
+}
+
+func errBoom(label string) error {
+	return errors.New(label)
 }
