@@ -12,7 +12,7 @@ Teams copy skill folders into `.claude/skills`, `.codex/skills`, and other agent
 
 - git repositories as skill sources
 - local and global scope
-- `init`, `add`, `install`, `remove`, `update`, `list`, and `doctor`
+- `init`, `add`, `install`, `remove`, `update`, `list`, `info`, and `doctor`
 
 ---
 
@@ -108,6 +108,7 @@ ski init [-g]
 ski add [-g] <source>
 ski install [-g]
 ski list [-g]
+ski info [-g] <skill>
 ski doctor [-g]
 ski update [-g] [skill]
 ski remove [-g] <skill>
