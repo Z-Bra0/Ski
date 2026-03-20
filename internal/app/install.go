@@ -12,11 +12,8 @@ import (
 )
 
 type plannedInstall struct {
-	Name            string
-	Targets         []string
-	StorePath       string
-	Lock            lockfile.Skill
-	TargetsToCreate []string
+	Name    string
+	Changes []updateTargetChange
 }
 
 // Install reads the active manifest and lockfile, fetches all skills into the
@@ -66,7 +63,10 @@ func (s Service) Install() (int, error) {
 		}
 
 		effectiveTargets := effectiveTargetsForSkill(doc, mSkill)
-		targetsToCreate, err := s.preflightInstallLinks(effectiveTargets, mSkill.Name, stored.Path)
+		if _, err := s.preflightInstallLinks(effectiveTargets, mSkill.Name, stored.Path); err != nil {
+			return 0, fmt.Errorf("skill %q: %w", mSkill.Name, err)
+		}
+		changes, err := s.planUpdateTargetChanges(mSkill, effectiveTargets, lockedEntry, hasLock, stored.Path)
 		if err != nil {
 			return 0, fmt.Errorf("skill %q: %w", mSkill.Name, err)
 		}
@@ -75,6 +75,7 @@ func (s Service) Install() (int, error) {
 			Name:      mSkill.Name,
 			Commit:    stored.Commit,
 			Integrity: stored.Integrity,
+			Version:   mSkill.Version,
 			Targets:   effectiveTargets,
 		}
 		lockEntry.Source, lockEntry.UpstreamSkill, err = canonicalSkillIdentity(mSkill.Source, mSkill.UpstreamSkill)
@@ -83,11 +84,8 @@ func (s Service) Install() (int, error) {
 		}
 		upsertLockSkill(&nextLock, lockEntry)
 		plans = append(plans, plannedInstall{
-			Name:            mSkill.Name,
-			Targets:         effectiveTargets,
-			StorePath:       stored.Path,
-			Lock:            lockEntry,
-			TargetsToCreate: targetsToCreate,
+			Name:    mSkill.Name,
+			Changes: changes,
 		})
 	}
 
@@ -100,19 +98,25 @@ func (s Service) Install() (int, error) {
 
 	linked := make([]plannedInstall, 0, len(plans))
 	for _, plan := range plans {
-		createdTargets := make([]string, 0, len(plan.TargetsToCreate))
-		for _, targetName := range plan.TargetsToCreate {
-			if err := s.linkAll([]string{targetName}, plan.Name, plan.StorePath); err != nil {
-				plan.TargetsToCreate = createdTargets
-				rollbackErr := s.rollbackInstall(linked, lockPath, originalLockData, hadLockfile)
+		appliedCount := 0
+		for _, change := range plan.Changes {
+			if err := s.applyUpdateTargetChange(plan.Name, change); err != nil {
+				rollbackPlans := append([]plannedInstall(nil), linked...)
+				if appliedCount > 0 {
+					rollbackPlans = append(rollbackPlans, plannedInstall{
+						Name:    plan.Name,
+						Changes: append([]updateTargetChange(nil), plan.Changes[:appliedCount]...),
+					})
+				}
+				rollbackErr := s.rollbackInstall(rollbackPlans, lockPath, originalLockData, hadLockfile)
 				if rollbackErr != nil {
 					return 0, fmt.Errorf("skill %q: %w (rollback failed: %v)", plan.Name, err, rollbackErr)
 				}
 				return 0, fmt.Errorf("skill %q: %w", plan.Name, err)
 			}
-			createdTargets = append(createdTargets, targetName)
+			appliedCount++
 		}
-		plan.TargetsToCreate = createdTargets
+		plan.Changes = plan.Changes[:appliedCount]
 		linked = append(linked, plan)
 	}
 
@@ -158,11 +162,22 @@ func (s Service) preflightInstallLinks(targets []string, name, storePath string)
 func (s Service) rollbackInstall(linked []plannedInstall, lockPath string, lockData []byte, hadLockfile bool) error {
 	var rollbackErr error
 	for i := len(linked) - 1; i >= 0; i-- {
-		if len(linked[i].TargetsToCreate) == 0 {
-			continue
-		}
-		if err := s.unlinkAll(linked[i].TargetsToCreate, linked[i].Name); err != nil {
-			rollbackErr = errors.Join(rollbackErr, err)
+		for j := len(linked[i].Changes) - 1; j >= 0; j-- {
+			change := linked[i].Changes[j]
+			if change.PreviousPath == change.DesiredPath {
+				continue
+			}
+			if change.DesiredPath != "" {
+				if err := s.unlinkAll([]string{change.Target}, linked[i].Name); err != nil {
+					rollbackErr = errors.Join(rollbackErr, err)
+					continue
+				}
+			}
+			if change.PreviousPath != "" {
+				if err := s.linkAll([]string{change.Target}, linked[i].Name, change.PreviousPath); err != nil {
+					rollbackErr = errors.Join(rollbackErr, err)
+				}
+			}
 		}
 	}
 	if err := restoreLockfile(lockPath, lockData, hadLockfile); err != nil {
