@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -362,4 +363,73 @@ func TestInitRejectsInvalidTargetSpecs(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestInitFailsWhenWorkingDirectoryResolutionFails(t *testing.T) {
+	t.Parallel()
+
+	cmd := NewRootCmd(Options{
+		Getwd:  func() (string, error) { return "", errBoom("cwd") },
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+	})
+	cmd.SetArgs([]string{"init"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want cwd error")
+	}
+	if !strings.Contains(err.Error(), "resolve working directory: cwd") {
+		t.Fatalf("Execute() error = %v, want cwd resolution error", err)
+	}
+}
+
+func TestInitFailsWhenHomeDirectoryResolutionFails(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return dir, nil },
+		GetHomeDir: func() (string, error) { return "", errBoom("home") },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	cmd.SetArgs([]string{"init"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want home error")
+	}
+	if !strings.Contains(err.Error(), "resolve home directory: home") {
+		t.Fatalf("Execute() error = %v, want home resolution error", err)
+	}
+}
+
+func TestInitFailsWhenManifestStatHitsUnexpectedError(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	baseFile := filepath.Join(dir, "not-a-directory")
+	if err := os.WriteFile(baseFile, []byte("x"), 0o644); err != nil {
+		t.Fatalf("WriteFile(baseFile) error = %v", err)
+	}
+
+	cmd := NewRootCmd(Options{
+		Getwd:  func() (string, error) { return filepath.Join(baseFile, "child"), nil },
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+	})
+	cmd.SetArgs([]string{"init"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want stat error")
+	}
+	if !strings.Contains(err.Error(), "stat ") {
+		t.Fatalf("Execute() error = %v, want stat error", err)
+	}
+}
+
+func errBoom(label string) error {
+	return errors.New(label)
 }
