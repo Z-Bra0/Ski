@@ -227,6 +227,101 @@ func TestUpdateRollsBackAfterLinkFailure(t *testing.T) {
 	}
 }
 
+func TestRemoveRollsBackAfterUnlinkFailure(t *testing.T) {
+	t.Parallel()
+
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+	const (
+		skillName = "repo-map"
+		source    = "git:https://example.com/repo-map.git"
+		commit    = "abc1234abc1234abc1234abc1234abc1234abc123"
+		storePath = "/tmp/fake-store-path"
+	)
+
+	manifestPath := filepath.Join(projectDir, manifest.FileName)
+	originalManifest := manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude", "codex"},
+		Skills: []manifest.Skill{
+			{Name: skillName, Source: source},
+		},
+	}
+	if err := manifest.WriteFile(manifestPath, originalManifest); err != nil {
+		t.Fatalf("WriteFile(manifest) error = %v", err)
+	}
+	originalLock := lockfile.Lockfile{
+		Version: 1,
+		Skills: []lockfile.Skill{
+			{
+				Name:      skillName,
+				Source:    source,
+				Commit:    commit,
+				Integrity: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				Targets:   []string{"claude", "codex"},
+			},
+		},
+	}
+	if err := lockfile.WriteFile(lockfile.Path(projectDir), originalLock); err != nil {
+		t.Fatalf("WriteFile(lockfile) error = %v", err)
+	}
+
+	for _, targetName := range []string{"claude", "codex"} {
+		if err := target.LinkAll(projectDir, []string{targetName}, skillName, storePath); err != nil {
+			t.Fatalf("LinkAll(%s) error = %v", targetName, err)
+		}
+	}
+
+	svc := Service{
+		ProjectDir: projectDir,
+		HomeDir:    homeDir,
+		linkAllFn: func(targets []string, name, storePath string) error {
+			return target.LinkAll(projectDir, targets, name, storePath)
+		},
+		unlinkAllFn: func(targets []string, name string) error {
+			if err := target.UnlinkAll(projectDir, []string{"claude"}, name); err != nil {
+				return err
+			}
+			return fmt.Errorf("forced remove unlink failure for %s", name)
+		},
+	}
+
+	err := svc.Remove(skillName)
+	if err == nil {
+		t.Fatal("Remove() error = nil, want forced unlink failure")
+	}
+	if !strings.Contains(err.Error(), "forced remove unlink failure for repo-map") {
+		t.Fatalf("Remove() error = %v, want forced unlink failure", err)
+	}
+
+	doc, err := manifest.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("ReadFile(manifest) error = %v", err)
+	}
+	if len(doc.Skills) != 1 || doc.Skills[0].Name != skillName {
+		t.Fatalf("manifest skills = %#v, want original skill after rollback", doc.Skills)
+	}
+
+	lf, err := lockfile.ReadFile(lockfile.Path(projectDir))
+	if err != nil {
+		t.Fatalf("ReadFile(lockfile) error = %v", err)
+	}
+	if len(lf.Skills) != 1 || lf.Skills[0].Name != skillName {
+		t.Fatalf("lockfile skills = %#v, want original skill after rollback", lf.Skills)
+	}
+
+	for _, targetName := range []string{"claude", "codex"} {
+		linkPath := filepath.Join(projectDir, "."+targetName, "skills", skillName)
+		targetPath, err := os.Readlink(linkPath)
+		if err != nil {
+			t.Fatalf("Readlink(%s) error = %v", targetName, err)
+		}
+		if targetPath != storePath {
+			t.Fatalf("%s symlink target = %q, want %q", targetName, targetPath, storePath)
+		}
+	}
+}
+
 type multiSkillSpec struct {
 	Path string
 	Name string
