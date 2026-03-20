@@ -7,7 +7,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Z-Bra0/Ski/internal/app"
-	"github.com/Z-Bra0/Ski/internal/manifest"
 	"github.com/Z-Bra0/Ski/internal/target"
 )
 
@@ -42,19 +41,9 @@ func newInitCmd(opts Options) *cobra.Command {
 				}
 			}
 
-			path, err := svc.Init()
+			path, err := svc.InitWithTargets(selectedTargets)
 			if err != nil {
 				return err
-			}
-			if len(selectedTargets) > 0 {
-				doc, err := manifest.ReadFile(path)
-				if err != nil {
-					return err
-				}
-				doc.Targets = selectedTargets
-				if err := manifest.WriteFile(path, *doc); err != nil {
-					return err
-				}
 			}
 
 			fmt.Fprintf(cmd.OutOrStdout(), "created %s\n", path)

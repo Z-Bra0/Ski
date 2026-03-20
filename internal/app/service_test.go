@@ -76,6 +76,31 @@ func TestAddSelectedRollsBackAfterLinkFailure(t *testing.T) {
 	}
 }
 
+func TestInitWithTargetsWritesSelectedTargets(t *testing.T) {
+	t.Parallel()
+
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	svc := Service{
+		ProjectDir: projectDir,
+		HomeDir:    homeDir,
+	}
+
+	path, err := svc.InitWithTargets([]string{"claude", "codex"})
+	if err != nil {
+		t.Fatalf("InitWithTargets() error = %v", err)
+	}
+
+	doc, err := manifest.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(manifest) error = %v", err)
+	}
+	if got, want := doc.Targets, []string{"claude", "codex"}; !sameStrings(got, want) {
+		t.Fatalf("manifest targets = %#v, want %#v", got, want)
+	}
+}
+
 func TestInstallRollsBackAfterLinkFailure(t *testing.T) {
 	t.Parallel()
 
