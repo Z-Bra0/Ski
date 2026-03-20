@@ -301,3 +301,65 @@ func TestInitGlobalRejectsTargetsThatResolveToSameDirectory(t *testing.T) {
 		t.Fatalf("global manifest stat error = %v, want not exist", statErr)
 	}
 }
+
+func TestInitRejectsInvalidTargetSpecs(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		target  string
+		wantErr string
+	}{
+		{
+			name:    "missing custom dir path",
+			target:  "dir:",
+			wantErr: `custom target "dir:": missing directory path`,
+		},
+		{
+			name:    "escape outside project",
+			target:  "dir:../escape",
+			wantErr: `target "dir:../escape" must resolve to a subdirectory within the project root`,
+		},
+		{
+			name:    "absolute path",
+			target:  "dir:/abs/path",
+			wantErr: `custom target "dir:/abs/path" must be project-relative`,
+		},
+		{
+			name:    "home expansion outside global scope",
+			target:  "dir:~/skills",
+			wantErr: `custom target "dir:~/skills" may use ~ only in global scope`,
+		},
+		{
+			name:    "unsupported target",
+			target:  "unsupported-target",
+			wantErr: `unsupported target "unsupported-target"`,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			cmd := NewRootCmd(Options{
+				Getwd:  func() (string, error) { return dir, nil },
+				Stdout: &bytes.Buffer{},
+				Stderr: &bytes.Buffer{},
+			})
+			cmd.SetArgs([]string{"init", "--target", tc.target})
+
+			err := cmd.Execute()
+			if err == nil {
+				t.Fatal("Execute() error = nil, want validation error")
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("Execute() error = %v, want %q", err, tc.wantErr)
+			}
+			if _, statErr := os.Stat(filepath.Join(dir, manifest.FileName)); !os.IsNotExist(statErr) {
+				t.Fatalf("manifest stat error = %v, want not exist", statErr)
+			}
+		})
+	}
+}
