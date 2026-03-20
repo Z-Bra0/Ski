@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -248,5 +249,55 @@ func TestInitWithTargetFlagsSkipsPrompt(t *testing.T) {
 	}
 	if !reflect.DeepEqual(*doc, want) {
 		t.Fatalf("manifest = %#v, want %#v", *doc, want)
+	}
+}
+
+func TestInitRejectsTargetsThatResolveToSameDirectory(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	cmd := NewRootCmd(Options{
+		Getwd:  func() (string, error) { return dir, nil },
+		Stdout: &bytes.Buffer{},
+		Stderr: &bytes.Buffer{},
+	})
+	cmd.SetArgs([]string{"init", "--target", "claude", "--target", "dir:./.claude/skills"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want duplicate-directory error")
+	}
+	if !strings.Contains(err.Error(), `targets "claude" and "dir:./.claude/skills" resolve to the same directory`) {
+		t.Fatalf("Execute() error = %v, want duplicate-directory error", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, manifest.FileName)); !os.IsNotExist(statErr) {
+		t.Fatalf("manifest stat error = %v, want not exist", statErr)
+	}
+}
+
+func TestInitGlobalRejectsTargetsThatResolveToSameDirectory(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	homeDir := t.TempDir()
+
+	cmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return dir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	cmd.SetArgs([]string{"init", "-g", "--target", "claude", "--target", "dir:~/.claude/skills"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want duplicate-directory error")
+	}
+	if !strings.Contains(err.Error(), `targets "claude" and "dir:~/.claude/skills" resolve to the same directory`) {
+		t.Fatalf("Execute() error = %v, want duplicate-directory error", err)
+	}
+	if _, statErr := os.Stat(manifest.GlobalPath(homeDir)); !os.IsNotExist(statErr) {
+		t.Fatalf("global manifest stat error = %v, want not exist", statErr)
 	}
 }

@@ -86,6 +86,7 @@ func promptForInitTargets(cmd *cobra.Command, opts Options) ([]string, error) {
 func normalizeInitTargets(values []string, svc app.Service, allowBareCustom bool) ([]string, error) {
 	normalized := make([]string, 0, len(values))
 	seen := make(map[string]struct{}, len(values))
+	seenDirs := make(map[string]string, len(values))
 	for _, value := range values {
 		targetName := strings.TrimSpace(value)
 		if targetName == "" {
@@ -96,14 +97,19 @@ func normalizeInitTargets(values []string, svc app.Service, allowBareCustom bool
 		}
 
 		var err error
+		resolvedDir := ""
 		if svc.Global {
-			_, err = target.GlobalSkillDir(svc.HomeDir, targetName)
+			resolvedDir, err = target.GlobalSkillDir(svc.HomeDir, targetName)
 		} else {
-			_, err = target.SkillDir(svc.ProjectDir, targetName)
+			resolvedDir, err = target.SkillDir(svc.ProjectDir, targetName)
 		}
 		if err != nil {
 			return nil, err
 		}
+		if previous, ok := seenDirs[resolvedDir]; ok && previous != targetName {
+			return nil, fmt.Errorf("targets %q and %q resolve to the same directory %s", previous, targetName, resolvedDir)
+		}
+		seenDirs[resolvedDir] = targetName
 		if _, ok := seen[targetName]; ok {
 			continue
 		}
