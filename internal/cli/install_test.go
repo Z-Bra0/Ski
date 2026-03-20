@@ -23,7 +23,11 @@ func TestInstallFromLockfile(t *testing.T) {
 	if err := manifest.WriteFile(filepath.Join(projectDir, manifest.FileName), manifest.Manifest{
 		Version: 1,
 		Targets: []string{"claude"},
-		Skills:  []manifest.Skill{{Name: "repo-map", Source: "git:" + repoPath + "@v1.0.0"}},
+		Skills: []manifest.Skill{{
+			Name:    "repo-map",
+			Source:  "git:" + repoPath + "@v1.0.0",
+			Version: "1.2.3",
+		}},
 	}); err != nil {
 		t.Fatalf("WriteFile(manifest) error = %v", err)
 	}
@@ -138,7 +142,11 @@ func TestInstallWithoutLockfileGeneratesOne(t *testing.T) {
 	if err := manifest.WriteFile(filepath.Join(projectDir, manifest.FileName), manifest.Manifest{
 		Version: 1,
 		Targets: []string{"claude"},
-		Skills:  []manifest.Skill{{Name: "repo-map", Source: "git:" + repoPath + "@v1.0.0"}},
+		Skills: []manifest.Skill{{
+			Name:    "repo-map",
+			Source:  "git:" + repoPath + "@v1.0.0",
+			Version: "1.2.3",
+		}},
 	}); err != nil {
 		t.Fatalf("WriteFile(manifest) error = %v", err)
 	}
@@ -161,6 +169,9 @@ func TestInstallWithoutLockfileGeneratesOne(t *testing.T) {
 	}
 	if len(lf.Skills) != 1 || lf.Skills[0].Commit != commit {
 		t.Fatalf("lockfile = %#v, want commit %q", lf.Skills, commit)
+	}
+	if lf.Skills[0].Version != "1.2.3" {
+		t.Fatalf("lockfile version = %q, want 1.2.3", lf.Skills[0].Version)
 	}
 	if !reflect.DeepEqual(lf.Skills[0].Targets, []string{"claude"}) {
 		t.Fatalf("lockfile targets = %#v, want [claude]", lf.Skills[0].Targets)

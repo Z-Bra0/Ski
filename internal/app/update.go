@@ -129,6 +129,7 @@ func (s Service) Update(name string) ([]UpdateInfo, error) {
 
 		lockEntry := lockfile.Skill{
 			Name:      mSkill.Name,
+			Version:   mSkill.Version,
 			Commit:    stored.Commit,
 			Integrity: stored.Integrity,
 			Targets:   targets,

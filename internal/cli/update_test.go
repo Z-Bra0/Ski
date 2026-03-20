@@ -73,6 +73,64 @@ func TestUpdateAdvancesLockfileAndSymlink(t *testing.T) {
 	}
 }
 
+func TestUpdatePreservesInformationalVersionInLockfile(t *testing.T) {
+	t.Parallel()
+
+	repoPath, _ := createGitRepo(t, "repo-map", "repo-map")
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	if err := manifest.WriteFile(filepath.Join(projectDir, manifest.FileName), manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills: []manifest.Skill{
+			{
+				Name:    "repo-map",
+				Source:  "git:" + repoPath + "@v1.0.0",
+				Version: "1.2.3",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("WriteFile(manifest) error = %v", err)
+	}
+
+	installCmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	installCmd.SetArgs([]string{"install"})
+	if err := installCmd.Execute(); err != nil {
+		t.Fatalf("install Execute() error = %v", err)
+	}
+
+	advanceGitRepo(t, repoPathForURL(t, repoPath), "repo-map", "second")
+
+	updateCmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	updateCmd.SetArgs([]string{"update"})
+	if err := updateCmd.Execute(); err != nil {
+		t.Fatalf("update Execute() error = %v", err)
+	}
+
+	lf, err := lockfile.ReadFile(lockfile.Path(projectDir))
+	if err != nil {
+		t.Fatalf("ReadFile(lockfile) error = %v", err)
+	}
+	lock, ok := findLockSkillForTest(lf.Skills, "repo-map")
+	if !ok {
+		t.Fatal("lockfile missing repo-map entry")
+	}
+	if lock.Version != "1.2.3" {
+		t.Fatalf("lockfile version = %q, want 1.2.3", lock.Version)
+	}
+}
+
 func TestUpdateGlobalAdvancesHomeLockfileAndSymlink(t *testing.T) {
 	t.Parallel()
 
