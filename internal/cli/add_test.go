@@ -13,8 +13,10 @@ import (
 
 	"github.com/Z-Bra0/Ski/internal/lockfile"
 	"github.com/Z-Bra0/Ski/internal/manifest"
+	"github.com/Z-Bra0/Ski/internal/skill"
 	"github.com/Z-Bra0/Ski/internal/source"
 	"github.com/Z-Bra0/Ski/internal/testutil"
+	"github.com/spf13/cobra"
 )
 
 var repoPathByURL sync.Map
@@ -304,13 +306,46 @@ allowed-tools:
 		t.Fatalf("stderr = %q, want warning paths rewritten away from temp checkout", stderr.String())
 	}
 	for _, want := range []string{
-		`warning: skill "gstack" (` + storeSkillPath + `): unknown frontmatter field "version" is outside the Agent Skills spec`,
-		`warning: skill "gstack" (` + storeSkillPath + `): description exceeds the Agent Skills spec limit of 1024 characters`,
-		`warning: skill "gstack" (` + storeSkillPath + `): allowed-tools should use the Agent Skills space-delimited string form`,
+		`warning: strict Agent Skills mismatches found in 1 skill (3 warnings)`,
+		`skill "gstack" (` + storeSkillPath + `)`,
+		`- unknown frontmatter field "version" is outside the Agent Skills spec`,
+		`- description exceeds the Agent Skills spec limit of 1024 characters`,
+		`- allowed-tools should use the Agent Skills space-delimited string form`,
 	} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("stderr = %q, want substring %q", stderr.String(), want)
 		}
+	}
+}
+
+func TestPrintSkillWarningsGroupsAndSortsOutput(t *testing.T) {
+	t.Parallel()
+
+	var stderr bytes.Buffer
+	cmd := &cobra.Command{}
+	cmd.SetErr(&stderr)
+
+	printSkillWarnings(cmd, []skill.ValidationWarning{
+		{Name: "beta", Path: "/tmp/beta/SKILL.md", Message: `unknown frontmatter field "version" is outside the Agent Skills spec`},
+		{Name: "alpha", Path: "/tmp/alpha/SKILL.md", Message: "allowed-tools should use the Agent Skills space-delimited string form"},
+		{Name: "alpha", Path: "/tmp/alpha/SKILL.md", Message: `unknown frontmatter field "version" is outside the Agent Skills spec`},
+	})
+
+	got := stderr.String()
+	for _, want := range []string{
+		`warning: strict Agent Skills mismatches found in 2 skills (3 warnings)`,
+		`skill "alpha" (/tmp/alpha/SKILL.md)`,
+		`- allowed-tools should use the Agent Skills space-delimited string form`,
+		`- unknown frontmatter field "version" is outside the Agent Skills spec`,
+		"\n\nskill \"beta\" (/tmp/beta/SKILL.md)\n",
+		`- unknown frontmatter field "version" is outside the Agent Skills spec`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("stderr = %q, want substring %q", got, want)
+		}
+	}
+	if strings.Index(got, `skill "alpha" (/tmp/alpha/SKILL.md)`) > strings.Index(got, `skill "beta" (/tmp/beta/SKILL.md)`) {
+		t.Fatalf("stderr = %q, want alpha group before beta group", got)
 	}
 }
 
