@@ -15,6 +15,7 @@ func newAddCmd(opts Options) *cobra.Command {
 	var name string
 	var addAll bool
 	var skills []string
+	var targets []string
 
 	cmd := &cobra.Command{
 		Use:   "add <source>",
@@ -25,9 +26,42 @@ func newAddCmd(opts Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			src, err := source.ParseGit(args[0])
+			targetOverride, err := normalizeInitTargets(targets, svc, false)
 			if err != nil {
 				return err
+			}
+			src, err := source.ParseGit(args[0])
+			if err != nil {
+				refInfo, isRef, refErr := resolveSkillReferenceInfo(svc, args[0])
+				if refErr != nil {
+					return refErr
+				}
+				if !isRef {
+					return err
+				}
+				if len(targetOverride) == 0 {
+					return fmt.Errorf("skill references can only be used with --target")
+				}
+				if name != "" || addAll || len(skills) > 0 {
+					return fmt.Errorf("skill references cannot be combined with --name, --skill, or --all")
+				}
+
+				selected := []string(nil)
+				if refInfo.UpstreamSkill != "" {
+					selected = []string{refInfo.UpstreamSkill}
+				}
+				added, warnings, err := svc.AddSelected(refInfo.Source, selected, refInfo.Name, false, targetOverride)
+				if err != nil {
+					return err
+				}
+				printSkillWarnings(cmd, warnings)
+
+				if len(added) == 1 {
+					fmt.Fprintf(cmd.OutOrStdout(), "added %s to %s\n", added[0], manifestDisplayName(svc))
+					return nil
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "added %d skills to %s: %s\n", len(added), manifestDisplayName(svc), strings.Join(added, ", "))
+				return nil
 			}
 
 			if len(src.Skills) > 0 && len(skills) > 0 {
@@ -41,7 +75,7 @@ func newAddCmd(opts Options) *cobra.Command {
 			if len(selected) == 0 {
 				selected = append(selected, src.Skills...)
 			}
-			added, warnings, err := svc.AddSelected(args[0], selected, name, addAll)
+			added, warnings, err := svc.AddSelected(args[0], selected, name, addAll, targetOverride)
 			if err != nil {
 				var multiErr app.MultiSkillSelectionError
 				if !errors.As(err, &multiErr) {
@@ -52,7 +86,7 @@ func newAddCmd(opts Options) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				added, warnings, err = svc.AddSelected(args[0], selected, name, addAll)
+				added, warnings, err = svc.AddSelected(args[0], selected, name, addAll, targetOverride)
 				if err != nil {
 					return err
 				}
@@ -68,9 +102,10 @@ func newAddCmd(opts Options) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&name, "name", "", "Override the local skill name written to ski.toml for a single selected skill")
+	cmd.Flags().StringVar(&name, "name", "", "Override the local skill name for one added skill only; cannot be used when adding multiple skills")
 	cmd.Flags().StringSliceVar(&skills, "skill", nil, "Select one or more discovered upstream skills by name")
 	cmd.Flags().BoolVar(&addAll, "all", false, "Add all skills discovered in the repository")
+	cmd.Flags().StringSliceVar(&targets, "target", nil, "Override targets for the added skill entries (for example claude or dir:./agent-skills/claude)")
 	return cmd
 }
 

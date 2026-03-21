@@ -105,13 +105,13 @@ make test
 
 ```bash
 ski init [-g]
-ski add [-g] <source>
+ski add [-g] [--target target]... <source>
 ski install [-g]
 ski list [-g]
 ski info [-g] <skill>
 ski doctor [-g]
 ski update [-g] [skill]
-ski remove [-g] <skill>
+ski remove [-g] [--target target]... <skill>
 ski version
 ```
 
@@ -121,6 +121,9 @@ ski version
 
 - Use `ski` only with skill repositories you have verified and trust. Review the upstream repo and `SKILL.md` before `add`, `install`, or `update`.
 - `ski add` prompts when a repo contains multiple skills. In non-interactive mode, use `--skill` or `--all`.
+- `ski add --target ...` writes a per-skill target override for new skills. If the skill already exists with the same identity, `add --target ...` extends it into those additional targets.
+- `ski remove --target ...` removes a skill only from those targets. Without `--target`, `remove` deletes the skill entry entirely.
+- `ski list` shows 1-based skill references like `@1`. Those references are scope-local and can be used with `info`, `update`, `remove`, and `add @N --target ...`.
 - Supported sources are remote Git endpoints. You can use `git:https://...` or omit the `git:` prefix for URL-form sources such as `https://...`, `ssh://...`, and `git://...`.
 - `ski version` reports the CLI build version. Dev builds print `dev`; release builds use the version passed to `make release VERSION=...`.
 - `make release VERSION=...` also writes `dist/ski_<version>_checksums.txt` for installer verification.

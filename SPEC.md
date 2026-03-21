@@ -201,6 +201,10 @@ Validates a `git:` source, discovers `SKILL.md` files recursively up to depth 3,
 
 If `--skill <name>` is provided, only those discovered skills are added. `--skill` may be repeated.
 
+If `--target <name>` is provided, `ski add` writes those targets onto each added skill entry and uses them instead of the manifest-level top-level `targets`. `--target` may be repeated.
+
+If the selected skill already exists in the active manifest with the same identity, `ski add --target ...` extends that existing skill into the requested additional targets instead of failing as a duplicate.
+
 If no `--skill` is provided and the repository contains exactly one skill, `ski add` adds that skill automatically.
 
 If no `--skill` is provided and the repository contains multiple skills:
@@ -217,7 +221,9 @@ source = "git:https://github.com/org/skill-pack.git"
 upstream_skill = "repo-map"
 ```
 
-Older manifests and lockfiles may still encode the selected upstream skill in `source` using the legacy `##skill-name` form; both formats are read during migration. `ski add` fetches into `~/.ski/store/`, links to the active-scope targets, and writes the active lockfile. Same as `npm install <pkg>`.
+If `--target` is not provided, `ski add` uses the active manifest's top-level `targets`.
+
+Older manifests and lockfiles may still encode the selected upstream skill in `source` using the legacy `##skill-name` form; both formats are read during migration. `ski add` fetches into `~/.ski/store/`, links to the effective targets for each added skill, and writes the active lockfile. Same as `npm install <pkg>`.
 
 ### `ski install`
 
@@ -228,6 +234,8 @@ If the active lockfile does not exist yet, `ski install` resolves the manifest e
 ### `ski list`
 
 Lists the skills declared in the active scope, including canonical source, upstream skill, locked commit, and effective targets.
+
+`ski list` prints a 1-based `#` column. Commands in the same scope may use `@N` to refer to those rows without repeating the skill name, for example `ski info @1`, `ski update @1`, `ski remove @1`, or `ski add @1 --target codex`.
 
 ### `ski info <skill>`
 
@@ -248,6 +256,10 @@ No args: updates all skills to latest commit, rewrites lockfile.
 ### `ski remove <skill>`
 
 Removes from the active manifest, removes from the active lockfile, and unlinks from all active-scope targets.
+
+If `--target <name>` is provided, `ski remove` unlinks only those targets from the selected skill and updates that skill's manifest and lockfile targets instead of deleting the skill entry entirely.
+
+If removing the requested targets leaves the skill with no effective targets, `ski remove --target ...` removes the skill entry entirely.
 
 Store contents are left in `~/.ski/store/`.
 

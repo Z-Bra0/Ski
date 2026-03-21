@@ -25,7 +25,7 @@ type plannedAdd struct {
 // Add parses a git source, fetches it into the store, links to targets,
 // and writes both the manifest and lockfile.
 // Returns the skill names that were added.
-func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOverride string, addAll bool) ([]string, []skill.ValidationWarning, error) {
+func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOverride string, addAll bool, targetOverride []string) ([]string, []skill.ValidationWarning, error) {
 	path := s.manifestPath()
 	originalManifestData, err := os.ReadFile(path)
 	if err != nil {
@@ -109,6 +109,9 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 
 	baseSource := src.WithoutSkills()
 	effectiveTargets := append([]string(nil), doc.Targets...)
+	if len(targetOverride) > 0 {
+		effectiveTargets = append([]string(nil), targetOverride...)
+	}
 	nextDoc := cloneManifest(*doc)
 	nextLock := cloneLockfile(*lf)
 	added := make([]string, 0, len(requestedSkills))
@@ -122,7 +125,75 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 		canonical := baseSource.String()
 
 		if existing, ok := findSkill(nextDoc.Skills, func(skill manifest.Skill) bool { return skill.Name == localName }); ok {
-			return nil, nil, fmt.Errorf("skill name %q already exists for source %q", localName, existing.Source)
+			sameIdentity, err := sameSkillIdentity(existing.Source, existing.UpstreamSkill, canonical, selectedSkillName)
+			if err != nil {
+				return nil, nil, fmt.Errorf("skill %q: %w", existing.Name, err)
+			}
+			if !sameIdentity {
+				return nil, nil, fmt.Errorf("skill name %q already exists for source %q", localName, existing.Source)
+			}
+			if len(targetOverride) == 0 {
+				return nil, nil, fmt.Errorf("skill name %q already exists for source %q", localName, existing.Source)
+			}
+
+			currentTargets := effectiveTargetsForSkill(&nextDoc, existing)
+			mergedTargets := unionStrings(currentTargets, targetOverride)
+			targetsToLink := differenceStrings(mergedTargets, currentTargets)
+
+			var (
+				stored        store.Result
+				skillWarnings []skill.ValidationWarning
+			)
+			if locked, ok := findLockSkill(nextLock.Skills, localName); ok {
+				stored, err = store.FindGit(s.HomeDir, baseSource.WithSkills([]string{selectedSkillName}), locked.Commit, selectedSkillName)
+				if err != nil {
+					return nil, nil, err
+				}
+				lockEntry := locked
+				lockEntry.Source = canonical
+				lockEntry.UpstreamSkill = selectedSkillName
+				lockEntry.Version = existing.Version
+				lockEntry.Targets = mergedTargets
+				upsertLockSkill(&nextLock, lockEntry)
+			} else {
+				stored, skillWarnings, err = store.EnsureGitWithWarnings(s.sourceResolveDir(), s.HomeDir, baseSource.WithSkills([]string{selectedSkillName}), selectedSkillName)
+				if err != nil {
+					return nil, nil, err
+				}
+				lockEntry := lockfile.Skill{
+					Name:          localName,
+					Source:        canonical,
+					UpstreamSkill: selectedSkillName,
+					Version:       existing.Version,
+					Commit:        stored.Commit,
+					Integrity:     stored.Integrity,
+					Targets:       mergedTargets,
+				}
+				upsertLockSkill(&nextLock, lockEntry)
+			}
+			warnings = append(warnings, skillWarnings...)
+
+			if err := s.preflightAddLinks(mergedTargets, localName, stored.Path); err != nil {
+				return nil, nil, err
+			}
+
+			for i := range nextDoc.Skills {
+				if nextDoc.Skills[i].Name != localName {
+					continue
+				}
+				nextDoc.Skills[i].Source = canonical
+				nextDoc.Skills[i].UpstreamSkill = selectedSkillName
+				nextDoc.Skills[i].Targets = skillTargetsOverride(nextDoc.Targets, mergedTargets)
+				break
+			}
+
+			planned = append(planned, plannedAdd{
+				Name:      localName,
+				Targets:   append([]string(nil), targetsToLink...),
+				StorePath: stored.Path,
+			})
+			added = append(added, localName)
+			continue
 		}
 		if existing, ok, err := findSkillByIdentity(nextDoc.Skills, canonical, selectedSkillName); err != nil {
 			return nil, nil, err
@@ -145,6 +216,7 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 			Source:        canonical,
 			UpstreamSkill: selectedSkillName,
 		}
+		manifestEntry.Targets = skillTargetsOverride(nextDoc.Targets, effectiveTargets)
 		lockEntry := lockfile.Skill{
 			Name:          localName,
 			Source:        canonical,

@@ -11,8 +11,9 @@ import (
 )
 
 // Remove deletes a skill from the active manifest, lockfile, and target symlinks.
+// When targetOverride is non-empty, it removes only those targets from the skill.
 // The store cache entry is left intact for potential reuse.
-func (s Service) Remove(name string) error {
+func (s Service) Remove(name string, targetOverride []string) error {
 	manifestPath := s.manifestPath()
 	originalManifestData, err := os.ReadFile(manifestPath)
 	if err != nil {
@@ -45,6 +46,9 @@ func (s Service) Remove(name string) error {
 	if lockEntry, ok := findLockSkill(lf.Skills, name); ok {
 		effectiveTargets = unionStrings(effectiveTargets, lockEntry.Targets)
 	}
+	if len(targetOverride) > 0 {
+		effectiveTargets = intersectStrings(effectiveTargets, targetOverride)
+	}
 
 	changes, err := s.planRemoveTargetChanges(effectiveTargets, name)
 	if err != nil {
@@ -64,7 +68,21 @@ func (s Service) Remove(name string) error {
 		applied = append(applied, change)
 	}
 
-	doc.Skills = removeByName(doc.Skills, name, func(skill manifest.Skill) string { return skill.Name })
+	currentTargets := effectiveTargetsForSkill(doc, ms)
+	remainingTargets := differenceStrings(currentTargets, targetOverride)
+	removeSkill := len(targetOverride) == 0 || len(remainingTargets) == 0
+
+	if removeSkill {
+		doc.Skills = removeByName(doc.Skills, name, func(skill manifest.Skill) string { return skill.Name })
+	} else {
+		for i := range doc.Skills {
+			if doc.Skills[i].Name != name {
+				continue
+			}
+			doc.Skills[i].Targets = skillTargetsOverride(doc.Targets, remainingTargets)
+			break
+		}
+	}
 	if err := manifest.WriteFile(manifestPath, *doc); err != nil {
 		rollbackErr := s.rollbackRemove(name, applied, manifestPath, originalManifestData, lockPath, originalLockData, hadLockfile)
 		if rollbackErr != nil {
@@ -73,7 +91,17 @@ func (s Service) Remove(name string) error {
 		return fmt.Errorf("write %s: %w", manifestPath, err)
 	}
 
-	lf.Skills = removeByName(lf.Skills, name, func(skill lockfile.Skill) string { return skill.Name })
+	if removeSkill {
+		lf.Skills = removeByName(lf.Skills, name, func(skill lockfile.Skill) string { return skill.Name })
+	} else {
+		for i := range lf.Skills {
+			if lf.Skills[i].Name != name {
+				continue
+			}
+			lf.Skills[i].Targets = append([]string(nil), remainingTargets...)
+			break
+		}
+	}
 	if err := lockfile.WriteFile(lockPath, *lf); err != nil {
 		rollbackErr := s.rollbackRemove(name, applied, manifestPath, originalManifestData, lockPath, originalLockData, hadLockfile)
 		if rollbackErr != nil {

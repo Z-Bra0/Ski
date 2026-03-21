@@ -29,9 +29,10 @@ func newListCmd(opts Options) *cobra.Command {
 			}
 
 			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "NAME\tSOURCE\tUPSTREAM\tCOMMIT\tTARGETS")
-			for _, info := range infos {
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+			fmt.Fprintln(w, "#\tNAME\tSOURCE\tUPSTREAM\tCOMMIT\tTARGETS")
+			for i, info := range infos {
+				fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\n",
+					i+1,
 					info.Name,
 					info.Source,
 					info.UpstreamSkill,

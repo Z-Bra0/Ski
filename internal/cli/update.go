@@ -21,7 +21,13 @@ func newUpdateCmd(opts Options) *cobra.Command {
 
 			name := ""
 			if len(args) == 1 {
-				name = args[0]
+				name, _, err = resolveSkillReferenceName(svc, args[0])
+				if err != nil {
+					return err
+				}
+				if name == "" {
+					name = args[0]
+				}
 			}
 
 			if check {

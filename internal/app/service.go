@@ -320,6 +320,43 @@ func sameStrings(a, b []string) bool {
 	return true
 }
 
+func differenceStrings(a, b []string) []string {
+	out := make([]string, 0, len(a))
+	seen := make(map[string]struct{}, len(b))
+	for _, item := range b {
+		seen[item] = struct{}{}
+	}
+	for _, item := range a {
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func intersectStrings(a, b []string) []string {
+	out := make([]string, 0, len(a))
+	seen := make(map[string]struct{}, len(b))
+	for _, item := range b {
+		seen[item] = struct{}{}
+	}
+	for _, item := range a {
+		if _, ok := seen[item]; !ok {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func skillTargetsOverride(defaultTargets, effectiveTargets []string) []string {
+	if sameStrings(defaultTargets, effectiveTargets) {
+		return nil
+	}
+	return append([]string(nil), effectiveTargets...)
+}
+
 func selectSkills(doc *manifest.Manifest, name string, manifestPath string) ([]manifest.Skill, error) {
 	if name == "" {
 		return doc.Skills, nil

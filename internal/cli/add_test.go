@@ -238,6 +238,260 @@ func TestAddSupportsNameOverride(t *testing.T) {
 	}
 }
 
+func TestAddSupportsTargetOverrideFlag(t *testing.T) {
+	t.Parallel()
+
+	repoPath, commit := createGitRepo(t, "repo-map", "repo-map")
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	path := filepath.Join(projectDir, manifest.FileName)
+	if err := manifest.WriteFile(path, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills:  []manifest.Skill{},
+	}); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	cmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	cmd.SetArgs([]string{"add", "git:" + repoPath, "--target", "codex"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	doc, err := manifest.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(manifest) error = %v", err)
+	}
+	wantManifest := manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills: []manifest.Skill{
+			{
+				Name:          "repo-map",
+				Source:        "git:" + repoPath,
+				UpstreamSkill: "repo-map",
+				Targets:       []string{"codex"},
+			},
+		},
+	}
+	if !reflect.DeepEqual(*doc, wantManifest) {
+		t.Fatalf("manifest = %#v, want %#v", *doc, wantManifest)
+	}
+
+	lf, err := lockfile.ReadFile(filepath.Join(projectDir, lockfile.FileName))
+	if err != nil {
+		t.Fatalf("ReadFile(lockfile) error = %v", err)
+	}
+	if len(lf.Skills) != 1 {
+		t.Fatalf("lockfile skills = %#v, want one entry", lf.Skills)
+	}
+	if !reflect.DeepEqual(lf.Skills[0].Targets, []string{"codex"}) {
+		t.Fatalf("lockfile targets = %#v, want [codex]", lf.Skills[0].Targets)
+	}
+
+	storePath := filepath.Join(homeDir, ".ski", "store", "git", "repo-map", commit)
+	codexLink := filepath.Join(projectDir, ".codex", "skills", "repo-map")
+	targetPath, err := os.Readlink(codexLink)
+	if err != nil {
+		t.Fatalf("Readlink(codex) error = %v", err)
+	}
+	if targetPath != storePath {
+		t.Fatalf("codex symlink target = %q, want %q", targetPath, storePath)
+	}
+	if _, err := os.Lstat(filepath.Join(projectDir, ".claude", "skills", "repo-map")); !os.IsNotExist(err) {
+		t.Fatalf("claude link stat error = %v, want not exist", err)
+	}
+}
+
+func TestAddExtendsTargetsForExistingSkill(t *testing.T) {
+	t.Parallel()
+
+	repoPath, commit := createGitRepo(t, "repo-map", "repo-map")
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	path := filepath.Join(projectDir, manifest.FileName)
+	if err := manifest.WriteFile(path, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills:  []manifest.Skill{},
+	}); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	addCmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	addCmd.SetArgs([]string{"add", "git:" + repoPath})
+	if err := addCmd.Execute(); err != nil {
+		t.Fatalf("first Execute() error = %v", err)
+	}
+
+	doc, err := manifest.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(manifest after first add) error = %v", err)
+	}
+	if len(doc.Skills) != 1 {
+		t.Fatalf("manifest skills = %#v, want one entry", doc.Skills)
+	}
+	doc.Skills[0].Version = "1.2.3"
+	if err := manifest.WriteFile(path, *doc); err != nil {
+		t.Fatalf("WriteFile(manifest with version) error = %v", err)
+	}
+
+	lf, err := lockfile.ReadFile(filepath.Join(projectDir, lockfile.FileName))
+	if err != nil {
+		t.Fatalf("ReadFile(lockfile after first add) error = %v", err)
+	}
+	if len(lf.Skills) != 1 {
+		t.Fatalf("lockfile skills = %#v, want one entry", lf.Skills)
+	}
+	lf.Skills[0].Version = "stale-version"
+	if err := lockfile.WriteFile(filepath.Join(projectDir, lockfile.FileName), *lf); err != nil {
+		t.Fatalf("WriteFile(lockfile with stale version) error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	cmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &stdout,
+		Stderr:     &bytes.Buffer{},
+	})
+	cmd.SetArgs([]string{"add", "git:" + repoPath, "--target", "codex"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("second Execute() error = %v", err)
+	}
+
+	doc, err = manifest.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(manifest) error = %v", err)
+	}
+	wantManifest := manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills: []manifest.Skill{
+			{
+				Name:          "repo-map",
+				Source:        "git:" + repoPath,
+				UpstreamSkill: "repo-map",
+				Version:       "1.2.3",
+				Targets:       []string{"claude", "codex"},
+			},
+		},
+	}
+	if !reflect.DeepEqual(*doc, wantManifest) {
+		t.Fatalf("manifest = %#v, want %#v", *doc, wantManifest)
+	}
+
+	lf, err = lockfile.ReadFile(filepath.Join(projectDir, lockfile.FileName))
+	if err != nil {
+		t.Fatalf("ReadFile(lockfile) error = %v", err)
+	}
+	if len(lf.Skills) != 1 {
+		t.Fatalf("lockfile skills = %#v, want one entry", lf.Skills)
+	}
+	if lf.Skills[0].Version != "1.2.3" {
+		t.Fatalf("lockfile version = %q, want 1.2.3", lf.Skills[0].Version)
+	}
+	if !reflect.DeepEqual(lf.Skills[0].Targets, []string{"claude", "codex"}) {
+		t.Fatalf("lockfile targets = %#v, want [claude codex]", lf.Skills[0].Targets)
+	}
+
+	storePath := filepath.Join(homeDir, ".ski", "store", "git", "repo-map", commit)
+	for _, linkPath := range []string{
+		filepath.Join(projectDir, ".claude", "skills", "repo-map"),
+		filepath.Join(projectDir, ".codex", "skills", "repo-map"),
+	} {
+		targetPath, err := os.Readlink(linkPath)
+		if err != nil {
+			t.Fatalf("Readlink(%q) error = %v", linkPath, err)
+		}
+		if targetPath != storePath {
+			t.Fatalf("symlink target for %s = %q, want %q", linkPath, targetPath, storePath)
+		}
+	}
+	if got := stdout.String(); !strings.Contains(got, "added repo-map") {
+		t.Fatalf("stdout = %q, want add confirmation", got)
+	}
+}
+
+func TestAddTargetOverrideAcceptsSkillReference(t *testing.T) {
+	t.Parallel()
+
+	repoPath, commit := createGitRepo(t, "repo-map", "repo-map")
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	path := filepath.Join(projectDir, manifest.FileName)
+	if err := manifest.WriteFile(path, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills:  []manifest.Skill{},
+	}); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	addCmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	addCmd.SetArgs([]string{"add", "git:" + repoPath})
+	if err := addCmd.Execute(); err != nil {
+		t.Fatalf("first Execute() error = %v", err)
+	}
+
+	cmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	cmd.SetArgs([]string{"add", "@1", "--target", "codex"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("second Execute() error = %v", err)
+	}
+
+	doc, err := manifest.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(manifest) error = %v", err)
+	}
+	if !reflect.DeepEqual(doc.Skills[0].Targets, []string{"claude", "codex"}) {
+		t.Fatalf("manifest skill targets = %#v, want [claude codex]", doc.Skills[0].Targets)
+	}
+
+	lf, err := lockfile.ReadFile(filepath.Join(projectDir, lockfile.FileName))
+	if err != nil {
+		t.Fatalf("ReadFile(lockfile) error = %v", err)
+	}
+	if !reflect.DeepEqual(lf.Skills[0].Targets, []string{"claude", "codex"}) {
+		t.Fatalf("lockfile targets = %#v, want [claude codex]", lf.Skills[0].Targets)
+	}
+
+	storePath := filepath.Join(homeDir, ".ski", "store", "git", "repo-map", commit)
+	codexLink := filepath.Join(projectDir, ".codex", "skills", "repo-map")
+	targetPath, err := os.Readlink(codexLink)
+	if err != nil {
+		t.Fatalf("Readlink(codex) error = %v", err)
+	}
+	if targetPath != storePath {
+		t.Fatalf("codex symlink target = %q, want %q", targetPath, storePath)
+	}
+}
+
 func TestAddIgnoresUnselectedInvalidSkills(t *testing.T) {
 	t.Parallel()
 
@@ -754,6 +1008,48 @@ func TestAddLinksIntoCustomTargetFolder(t *testing.T) {
 	}
 }
 
+func TestAddRejectsConflictingTargetOverrideDirs(t *testing.T) {
+	t.Parallel()
+
+	repoPath, _ := createGitRepo(t, "repo-map", "repo-map")
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	path := filepath.Join(projectDir, manifest.FileName)
+	originalManifest := manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills:  []manifest.Skill{},
+	}
+	if err := manifest.WriteFile(path, originalManifest); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	cmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	cmd.SetArgs([]string{"add", "git:" + repoPath, "--target", "claude", "--target", "dir:./.claude/skills"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want conflicting target error")
+	}
+	if !strings.Contains(err.Error(), `resolve to the same directory`) {
+		t.Fatalf("Execute() error = %v, want conflicting target directory error", err)
+	}
+
+	doc, err := manifest.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(manifest) error = %v", err)
+	}
+	if !reflect.DeepEqual(*doc, originalManifest) {
+		t.Fatalf("manifest = %#v, want %#v", *doc, originalManifest)
+	}
+}
+
 func TestAddGlobalWritesGlobalStateAndLinksToHome(t *testing.T) {
 	t.Parallel()
 
@@ -911,7 +1207,7 @@ func TestAddRejectsDuplicateDerivedName(t *testing.T) {
 		Skills: []manifest.Skill{
 			{
 				Name:          "repo-map",
-				Source:        "git:/tmp/original-repo-map",
+				Source:        "git:https://example.com/original-repo-map.git",
 				UpstreamSkill: "repo-map",
 			},
 		},
