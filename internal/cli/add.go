@@ -73,7 +73,7 @@ func newAddCmd(opts Options) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&name, "name", "", "Override the local skill name written to ski.toml for a single selected skill")
+	cmd.Flags().StringVar(&name, "name", "", "Override the local skill name for one added skill only; cannot be used when adding multiple skills")
 	cmd.Flags().StringSliceVar(&skills, "skill", nil, "Select one or more discovered upstream skills by name")
 	cmd.Flags().BoolVar(&addAll, "all", false, "Add all skills discovered in the repository")
 	cmd.Flags().StringSliceVar(&targets, "target", nil, "Override targets for the added skill entries (for example claude or dir:./agent-skills/claude)")
