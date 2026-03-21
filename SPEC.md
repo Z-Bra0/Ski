@@ -201,6 +201,8 @@ Validates a `git:` source, discovers `SKILL.md` files recursively up to depth 3,
 
 If `--skill <name>` is provided, only those discovered skills are added. `--skill` may be repeated.
 
+If `--target <name>` is provided, `ski add` writes those targets onto each added skill entry and uses them instead of the manifest-level top-level `targets`. `--target` may be repeated.
+
 If no `--skill` is provided and the repository contains exactly one skill, `ski add` adds that skill automatically.
 
 If no `--skill` is provided and the repository contains multiple skills:
@@ -217,7 +219,9 @@ source = "git:https://github.com/org/skill-pack.git"
 upstream_skill = "repo-map"
 ```
 
-Older manifests and lockfiles may still encode the selected upstream skill in `source` using the legacy `##skill-name` form; both formats are read during migration. `ski add` fetches into `~/.ski/store/`, links to the active-scope targets, and writes the active lockfile. Same as `npm install <pkg>`.
+If `--target` is not provided, `ski add` uses the active manifest's top-level `targets`.
+
+Older manifests and lockfiles may still encode the selected upstream skill in `source` using the legacy `##skill-name` form; both formats are read during migration. `ski add` fetches into `~/.ski/store/`, links to the effective targets for each added skill, and writes the active lockfile. Same as `npm install <pkg>`.
 
 ### `ski install`
 

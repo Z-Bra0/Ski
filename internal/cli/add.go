@@ -15,6 +15,7 @@ func newAddCmd(opts Options) *cobra.Command {
 	var name string
 	var addAll bool
 	var skills []string
+	var targets []string
 
 	cmd := &cobra.Command{
 		Use:   "add <source>",
@@ -36,12 +37,16 @@ func newAddCmd(opts Options) *cobra.Command {
 			if (len(src.Skills) > 0 || len(skills) > 0) && addAll {
 				return fmt.Errorf("--all cannot be used with explicit skill selectors")
 			}
+			targetOverride, err := normalizeInitTargets(targets, svc, false)
+			if err != nil {
+				return err
+			}
 
 			selected := append([]string(nil), skills...)
 			if len(selected) == 0 {
 				selected = append(selected, src.Skills...)
 			}
-			added, warnings, err := svc.AddSelected(args[0], selected, name, addAll)
+			added, warnings, err := svc.AddSelected(args[0], selected, name, addAll, targetOverride)
 			if err != nil {
 				var multiErr app.MultiSkillSelectionError
 				if !errors.As(err, &multiErr) {
@@ -52,7 +57,7 @@ func newAddCmd(opts Options) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				added, warnings, err = svc.AddSelected(args[0], selected, name, addAll)
+				added, warnings, err = svc.AddSelected(args[0], selected, name, addAll, targetOverride)
 				if err != nil {
 					return err
 				}
@@ -71,6 +76,7 @@ func newAddCmd(opts Options) *cobra.Command {
 	cmd.Flags().StringVar(&name, "name", "", "Override the local skill name written to ski.toml for a single selected skill")
 	cmd.Flags().StringSliceVar(&skills, "skill", nil, "Select one or more discovered upstream skills by name")
 	cmd.Flags().BoolVar(&addAll, "all", false, "Add all skills discovered in the repository")
+	cmd.Flags().StringSliceVar(&targets, "target", nil, "Override targets for the added skill entries (for example claude or dir:./agent-skills/claude)")
 	return cmd
 }
 

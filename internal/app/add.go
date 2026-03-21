@@ -25,7 +25,7 @@ type plannedAdd struct {
 // Add parses a git source, fetches it into the store, links to targets,
 // and writes both the manifest and lockfile.
 // Returns the skill names that were added.
-func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOverride string, addAll bool) ([]string, []skill.ValidationWarning, error) {
+func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOverride string, addAll bool, targetOverride []string) ([]string, []skill.ValidationWarning, error) {
 	path := s.manifestPath()
 	originalManifestData, err := os.ReadFile(path)
 	if err != nil {
@@ -109,6 +109,9 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 
 	baseSource := src.WithoutSkills()
 	effectiveTargets := append([]string(nil), doc.Targets...)
+	if len(targetOverride) > 0 {
+		effectiveTargets = append([]string(nil), targetOverride...)
+	}
 	nextDoc := cloneManifest(*doc)
 	nextLock := cloneLockfile(*lf)
 	added := make([]string, 0, len(requestedSkills))
@@ -144,6 +147,9 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 			Name:          localName,
 			Source:        canonical,
 			UpstreamSkill: selectedSkillName,
+		}
+		if len(targetOverride) > 0 {
+			manifestEntry.Targets = append([]string(nil), targetOverride...)
 		}
 		lockEntry := lockfile.Skill{
 			Name:          localName,

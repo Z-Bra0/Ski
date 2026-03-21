@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -48,7 +49,7 @@ func TestAddSelectedRollsBackAfterLinkFailure(t *testing.T) {
 			return target.UnlinkAll(projectDir, targets, name)
 		},
 	}
-	_, _, err := svc.AddSelected("git:"+repo.URL, []string{"alpha-skill", "beta-skill"}, "", false)
+	_, _, err := svc.AddSelected("git:"+repo.URL, []string{"alpha-skill", "beta-skill"}, "", false, nil)
 	if err == nil {
 		t.Fatal("AddSelected() error = nil, want forced link failure")
 	}
@@ -73,6 +74,83 @@ func TestAddSelectedRollsBackAfterLinkFailure(t *testing.T) {
 
 	if _, err := os.Stat(lockfile.Path(projectDir)); !os.IsNotExist(err) {
 		t.Fatalf("lockfile stat error = %v, want not exist", err)
+	}
+}
+
+func TestAddSelectedUsesSkillLevelTargetOverride(t *testing.T) {
+	t.Parallel()
+
+	repo := testutil.NewSkillRepo(t, "repo-map", "repo-map")
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	manifestPath := filepath.Join(projectDir, manifest.FileName)
+	if err := manifest.WriteFile(manifestPath, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills:  []manifest.Skill{},
+	}); err != nil {
+		t.Fatalf("WriteFile(manifest) error = %v", err)
+	}
+
+	svc := Service{
+		ProjectDir: projectDir,
+		HomeDir:    homeDir,
+	}
+
+	added, warnings, err := svc.AddSelected("git:"+repo.URL, nil, "", false, []string{"codex"})
+	if err != nil {
+		t.Fatalf("AddSelected() error = %v", err)
+	}
+	if got, want := added, []string{"repo-map"}; !sameStrings(got, want) {
+		t.Fatalf("added = %#v, want %#v", got, want)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v, want none", warnings)
+	}
+
+	doc, err := manifest.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("ReadFile(manifest) error = %v", err)
+	}
+	wantManifest := manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills: []manifest.Skill{
+			{
+				Name:          "repo-map",
+				Source:        "git:" + repo.URL,
+				UpstreamSkill: "repo-map",
+				Targets:       []string{"codex"},
+			},
+		},
+	}
+	if !reflect.DeepEqual(*doc, wantManifest) {
+		t.Fatalf("manifest = %#v, want %#v", *doc, wantManifest)
+	}
+
+	lf, err := lockfile.ReadFile(lockfile.Path(projectDir))
+	if err != nil {
+		t.Fatalf("ReadFile(lockfile) error = %v", err)
+	}
+	if len(lf.Skills) != 1 {
+		t.Fatalf("lockfile skills = %#v, want one entry", lf.Skills)
+	}
+	if got, want := lf.Skills[0].Targets, []string{"codex"}; !sameStrings(got, want) {
+		t.Fatalf("lockfile targets = %#v, want %#v", got, want)
+	}
+
+	storePath := filepath.Join(homeDir, ".ski", "store", "git", "repo-map", repo.Commit)
+	codexLink := filepath.Join(projectDir, ".codex", "skills", "repo-map")
+	targetPath, err := os.Readlink(codexLink)
+	if err != nil {
+		t.Fatalf("Readlink(codex) error = %v", err)
+	}
+	if targetPath != storePath {
+		t.Fatalf("codex symlink target = %q, want %q", targetPath, storePath)
+	}
+	if _, err := os.Lstat(filepath.Join(projectDir, ".claude", "skills", "repo-map")); !os.IsNotExist(err) {
+		t.Fatalf("claude link stat error = %v, want not exist", err)
 	}
 }
 
