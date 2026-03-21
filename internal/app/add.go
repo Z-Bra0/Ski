@@ -25,7 +25,7 @@ type plannedAdd struct {
 // Add parses a git source, fetches it into the store, links to targets,
 // and writes both the manifest and lockfile.
 // Returns the skill names that were added.
-func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOverride string) ([]string, []skill.ValidationWarning, error) {
+func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOverride string, addAll bool) ([]string, []skill.ValidationWarning, error) {
 	path := s.manifestPath()
 	originalManifestData, err := os.ReadFile(path)
 	if err != nil {
@@ -57,6 +57,37 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 	if len(requestedSkills) == 0 {
 		requestedSkills = append(requestedSkills, src.Skills...)
 	}
+	explicitSelection := len(requestedSkills) > 0
+	if !explicitSelection && !addAll {
+		selectable := make([]string, 0, len(discovered.Skills))
+		for _, discoveredSkill := range discovered.Skills {
+			if _, _, err := skill.ValidateDirWithWarnings(discoveredSkill.Path, discoveredSkill.Name); err == nil {
+				selectable = append(selectable, discoveredSkill.Name)
+			}
+		}
+		if len(selectable) > 1 {
+			return nil, nil, MultiSkillSelectionError{Skills: selectable}
+		}
+	}
+	if (!explicitSelection || addAll) && len(discovered.InvalidSkills) > 0 {
+		return nil, nil, discovered.InvalidSkills[0].Err
+	}
+	if !explicitSelection || addAll {
+		for _, discoveredSkill := range discovered.Skills {
+			if _, _, err := skill.ValidateDirWithWarnings(discoveredSkill.Path, discoveredSkill.Name); err != nil {
+				return nil, nil, err
+			}
+		}
+	}
+	if explicitSelection {
+		for _, requestedSkill := range requestedSkills {
+			for _, invalid := range discovered.InvalidSkills {
+				if invalid.CandidateName == requestedSkill {
+					return nil, nil, invalid.Err
+				}
+			}
+		}
+	}
 	requestedSkills, err = resolveRequestedSkills(discovered.Skills, requestedSkills)
 	if err != nil {
 		return nil, nil, err
@@ -82,6 +113,7 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 	nextLock := cloneLockfile(*lf)
 	added := make([]string, 0, len(requestedSkills))
 	planned := make([]plannedAdd, 0, len(requestedSkills))
+	warnings := make([]skill.ValidationWarning, 0)
 	for _, selectedSkillName := range requestedSkills {
 		localName := selectedSkillName
 		if nameOverride != "" {
@@ -98,10 +130,11 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 			return nil, nil, fmt.Errorf("source %q with upstream skill %q already exists as skill %q", canonical, selectedSkillName, existing.Name)
 		}
 
-		stored, err := store.EnsureGit(s.sourceResolveDir(), s.HomeDir, baseSource.WithSkills([]string{selectedSkillName}), selectedSkillName)
+		stored, skillWarnings, err := store.EnsureGitWithWarnings(s.sourceResolveDir(), s.HomeDir, baseSource.WithSkills([]string{selectedSkillName}), selectedSkillName)
 		if err != nil {
 			return nil, nil, err
 		}
+		warnings = append(warnings, skillWarnings...)
 
 		if err := s.preflightAddLinks(effectiveTargets, localName, stored.Path); err != nil {
 			return nil, nil, err
@@ -165,7 +198,7 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 		linked = append(linked, plan)
 	}
 
-	return added, append([]skill.ValidationWarning(nil), discovered.Warnings...), nil
+	return added, append([]skill.ValidationWarning(nil), warnings...), nil
 }
 
 func findSkillByIdentity(skills []manifest.Skill, sourceValue, upstreamSkill string) (manifest.Skill, bool, error) {

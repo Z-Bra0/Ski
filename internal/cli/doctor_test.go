@@ -222,6 +222,72 @@ description: tampered
 	}
 }
 
+func TestDoctorReportsMalformedStoredSelectedSkill(t *testing.T) {
+	t.Parallel()
+
+	repoPath, commit := createGitRepo(t, "repo-map", "repo-map")
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	if err := manifest.WriteFile(filepath.Join(projectDir, manifest.FileName), manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills: []manifest.Skill{
+			{
+				Name:   "repo-map",
+				Source: "git:" + repoPath + "@v1.0.0",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("WriteFile(manifest) error = %v", err)
+	}
+
+	installCmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	installCmd.SetArgs([]string{"install"})
+	if err := installCmd.Execute(); err != nil {
+		t.Fatalf("install Execute() error = %v", err)
+	}
+
+	storePath := filepath.Join(homeDir, ".ski", "store", "git", "repo-map", commit)
+	if err := os.WriteFile(filepath.Join(storePath, "SKILL.md"), []byte(`---
+name: repo-map
+description: [unterminated
+---
+`), 0o644); err != nil {
+		t.Fatalf("WriteFile(SKILL.md) error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	doctorCmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &stdout,
+		Stderr:     &bytes.Buffer{},
+	})
+	doctorCmd.SetArgs([]string{"doctor"})
+
+	err := doctorCmd.Execute()
+	if err == nil {
+		t.Fatal("doctor Execute() error = nil, want findings")
+	}
+	if !strings.Contains(err.Error(), "doctor found 1 issues") {
+		t.Fatalf("doctor error = %v, want issue summary", err)
+	}
+
+	out := stdout.String()
+	if strings.Contains(out, `skill "repo-map" not found in repository`) {
+		t.Fatalf("stdout = %q, want malformed skill error instead of not found", out)
+	}
+	if !strings.Contains(out, "parse YAML frontmatter") {
+		t.Fatalf("stdout = %q, want malformed skill finding", out)
+	}
+}
+
 func TestDoctorReportsStaleSymlinkFromRemovedTarget(t *testing.T) {
 	t.Parallel()
 

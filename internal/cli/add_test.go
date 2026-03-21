@@ -248,8 +248,77 @@ func TestAddWarnsOnStrictSkillSpecMismatchesButSucceeds(t *testing.T) {
 	repoPathByURL.Store(repo.URL, repo.Path)
 
 	rootSkillPath := filepath.Join(repo.Path, "SKILL.md")
-	rootSkillDoc := fmt.Sprintf(`---
+	rootSkillDoc := `---
 name: gstack
+version: 1.0.0
+---
+
+# gstack
+`
+	if err := os.WriteFile(rootSkillPath, []byte(rootSkillDoc), 0o644); err != nil {
+		t.Fatalf("WriteFile(root SKILL.md) error = %v", err)
+	}
+	testutil.RunGit(t, repo.Path, "add", ".")
+	testutil.RunGit(t, repo.Path, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "relax root skill spec")
+
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	path := filepath.Join(projectDir, manifest.FileName)
+	if err := manifest.WriteFile(path, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills:  []manifest.Skill{},
+	}); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &stdout,
+		Stderr:     &stderr,
+	})
+	cmd.SetArgs([]string{"add", repo.URL, "--skill", "office-hours"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	if got := stdout.String(); !strings.Contains(got, "added office-hours") {
+		t.Fatalf("stdout = %q, want add confirmation", got)
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want no warnings for unselected invalid skills", got)
+	}
+}
+
+func TestAddWarnsOnlyForSelectedSkill(t *testing.T) {
+	t.Parallel()
+
+	repo := testutil.NewMultiSkillRepo(t, "gstack", []testutil.SkillSpec{
+		{Path: ".", Name: "gstack"},
+		{Path: filepath.Join("skills", "office-hours"), Name: "office-hours"},
+	})
+	repoPathByURL.Store(repo.URL, repo.Path)
+
+	rootSkillPath := filepath.Join(repo.Path, "SKILL.md")
+	rootSkillDoc := `---
+name: gstack
+version: 1.0.0
+---
+
+# gstack
+`
+	if err := os.WriteFile(rootSkillPath, []byte(rootSkillDoc), 0o644); err != nil {
+		t.Fatalf("WriteFile(root SKILL.md) error = %v", err)
+	}
+
+	selectedSkillPath := filepath.Join(repo.Path, "skills", "office-hours", "SKILL.md")
+	selectedSkillDoc := fmt.Sprintf(`---
+name: office-hours
 version: 1.0.0
 description: %s
 allowed-tools:
@@ -257,13 +326,14 @@ allowed-tools:
   - Read
 ---
 
-# gstack
+# office-hours
 `, strings.Repeat("x", 1025))
-	if err := os.WriteFile(rootSkillPath, []byte(rootSkillDoc), 0o644); err != nil {
-		t.Fatalf("WriteFile(root SKILL.md) error = %v", err)
+	if err := os.WriteFile(selectedSkillPath, []byte(selectedSkillDoc), 0o644); err != nil {
+		t.Fatalf("WriteFile(selected SKILL.md) error = %v", err)
 	}
+
 	testutil.RunGit(t, repo.Path, "add", ".")
-	testutil.RunGit(t, repo.Path, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "relax root skill spec")
+	testutil.RunGit(t, repo.Path, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "customize skill metadata")
 
 	projectDir := t.TempDir()
 	homeDir := t.TempDir()
@@ -301,13 +371,13 @@ allowed-tools:
 	if len(lf.Skills) != 1 {
 		t.Fatalf("lockfile skills = %#v, want one entry", lf.Skills)
 	}
-	storeSkillPath := filepath.Join(homeDir, ".ski", "store", "git", "gstack", lf.Skills[0].Commit, "SKILL.md")
+	storeSkillPath := filepath.Join(homeDir, ".ski", "store", "git", "gstack", lf.Skills[0].Commit, "skills", "office-hours", "SKILL.md")
 	if strings.Contains(stderr.String(), "/checkout/SKILL.md") {
 		t.Fatalf("stderr = %q, want warning paths rewritten away from temp checkout", stderr.String())
 	}
 	for _, want := range []string{
 		`warning: strict Agent Skills mismatches found in 1 skill (3 warnings)`,
-		`skill "gstack" (` + storeSkillPath + `)`,
+		`skill "office-hours" (` + storeSkillPath + `)`,
 		`- unknown frontmatter field "version" is outside the Agent Skills spec`,
 		`- description exceeds the Agent Skills spec limit of 1024 characters`,
 		`- allowed-tools should use the Agent Skills space-delimited string form`,
@@ -315,6 +385,217 @@ allowed-tools:
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("stderr = %q, want substring %q", stderr.String(), want)
 		}
+	}
+	if strings.Contains(stderr.String(), `skill "gstack"`) {
+		t.Fatalf("stderr = %q, want no warnings for unselected skill gstack", stderr.String())
+	}
+}
+
+func TestAddRejectsMalformedSingleSkillRepoWithRealError(t *testing.T) {
+	t.Parallel()
+
+	repo := testutil.NewSkillRepo(t, "broken-skill", "broken-skill")
+	repoPathByURL.Store(repo.URL, repo.Path)
+
+	brokenSkillPath := filepath.Join(repo.Path, "SKILL.md")
+	if err := os.WriteFile(brokenSkillPath, []byte(`---
+name: broken-skill
+description: [unterminated
+---
+`), 0o644); err != nil {
+		t.Fatalf("WriteFile(broken SKILL.md) error = %v", err)
+	}
+	testutil.RunGit(t, repo.Path, "add", ".")
+	testutil.RunGit(t, repo.Path, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "break root skill")
+
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	path := filepath.Join(projectDir, manifest.FileName)
+	if err := manifest.WriteFile(path, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills:  []manifest.Skill{},
+	}); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	cmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	cmd.SetArgs([]string{"add", repo.URL})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want malformed skill error")
+	}
+	if strings.Contains(err.Error(), "no skills found in repository") {
+		t.Fatalf("Execute() error = %v, want real malformed skill error", err)
+	}
+	if !strings.Contains(err.Error(), "parse YAML frontmatter") {
+		t.Fatalf("Execute() error = %v, want YAML parse error", err)
+	}
+}
+
+func TestAddRejectsMalformedSelectedSkill(t *testing.T) {
+	t.Parallel()
+
+	repo := testutil.NewMultiSkillRepo(t, "gstack", []testutil.SkillSpec{
+		{Path: ".", Name: "gstack"},
+		{Path: filepath.Join("skills", "office-hours"), Name: "office-hours"},
+	})
+	repoPathByURL.Store(repo.URL, repo.Path)
+
+	selectedSkillPath := filepath.Join(repo.Path, "skills", "office-hours", "SKILL.md")
+	if err := os.WriteFile(selectedSkillPath, []byte(`---
+name: office-hours
+description: [unterminated
+---
+`), 0o644); err != nil {
+		t.Fatalf("WriteFile(selected broken SKILL.md) error = %v", err)
+	}
+	testutil.RunGit(t, repo.Path, "add", ".")
+	testutil.RunGit(t, repo.Path, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "break selected skill")
+
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	path := filepath.Join(projectDir, manifest.FileName)
+	if err := manifest.WriteFile(path, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills:  []manifest.Skill{},
+	}); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	cmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	cmd.SetArgs([]string{"add", repo.URL, "--skill", "office-hours"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want malformed selected skill error")
+	}
+	if strings.Contains(err.Error(), "skill \"office-hours\" not found in repository") {
+		t.Fatalf("Execute() error = %v, want malformed skill error instead of not found", err)
+	}
+	if !strings.Contains(err.Error(), "parse YAML frontmatter") {
+		t.Fatalf("Execute() error = %v, want YAML parse error", err)
+	}
+}
+
+func TestAddRejectsMalformedSelectedRootSkillWhenRepoNameDiffers(t *testing.T) {
+	t.Parallel()
+
+	repo := testutil.NewMultiSkillRepo(t, "skill-pack", []testutil.SkillSpec{
+		{Path: ".", Name: "placeholder"},
+		{Path: filepath.Join("skills", "office-hours"), Name: "office-hours"},
+	})
+	repoPathByURL.Store(repo.URL, repo.Path)
+
+	rootSkillPath := filepath.Join(repo.Path, "SKILL.md")
+	if err := os.WriteFile(rootSkillPath, []byte(`---
+name: repo-map
+description: [unterminated
+---
+`), 0o644); err != nil {
+		t.Fatalf("WriteFile(root broken SKILL.md) error = %v", err)
+	}
+	testutil.RunGit(t, repo.Path, "add", ".")
+	testutil.RunGit(t, repo.Path, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "break root skill with different name")
+
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	path := filepath.Join(projectDir, manifest.FileName)
+	if err := manifest.WriteFile(path, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills:  []manifest.Skill{},
+	}); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	cmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	cmd.SetArgs([]string{"add", repo.URL, "--skill", "repo-map"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want malformed selected root skill error")
+	}
+	if strings.Contains(err.Error(), `skill "repo-map" not found in repository`) {
+		t.Fatalf("Execute() error = %v, want malformed root skill error instead of not found", err)
+	}
+	if !strings.Contains(err.Error(), "parse YAML frontmatter") {
+		t.Fatalf("Execute() error = %v, want YAML parse error", err)
+	}
+}
+
+func TestAddRejectsBrokenSiblingWithoutExplicitSelection(t *testing.T) {
+	t.Parallel()
+
+	repo := testutil.NewMultiSkillRepo(t, "gstack", []testutil.SkillSpec{
+		{Path: ".", Name: "gstack"},
+		{Path: filepath.Join("skills", "office-hours"), Name: "office-hours"},
+	})
+	repoPathByURL.Store(repo.URL, repo.Path)
+
+	rootSkillPath := filepath.Join(repo.Path, "SKILL.md")
+	rootSkillDoc := `---
+name: gstack
+version: 1.0.0
+---
+
+# gstack
+`
+	if err := os.WriteFile(rootSkillPath, []byte(rootSkillDoc), 0o644); err != nil {
+		t.Fatalf("WriteFile(root SKILL.md) error = %v", err)
+	}
+	testutil.RunGit(t, repo.Path, "add", ".")
+	testutil.RunGit(t, repo.Path, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "break sibling skill")
+
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	path := filepath.Join(projectDir, manifest.FileName)
+	if err := manifest.WriteFile(path, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills:  []manifest.Skill{},
+	}); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	cmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	cmd.SetArgs([]string{"add", repo.URL})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want broken sibling error")
+	}
+	if strings.Contains(err.Error(), "multiple skills found in repository") {
+		t.Fatalf("Execute() error = %v, want broken sibling error instead of selection prompt", err)
+	}
+	if !strings.Contains(err.Error(), "description is required") {
+		t.Fatalf("Execute() error = %v, want compatibility validation error", err)
 	}
 }
 
@@ -1117,6 +1398,77 @@ func TestAddMultiSkillRepoPromptsForSelectionOnTTY(t *testing.T) {
 	wantTarget := filepath.Join(homeDir, ".ski", "store", "git", "skill-pack", commit, "skills", "beta-skill")
 	if targetPath != wantTarget {
 		t.Fatalf("symlink target = %q, want %q", targetPath, wantTarget)
+	}
+	if !strings.Contains(stdout.String(), "added beta-skill") {
+		t.Fatalf("stdout = %q, want add confirmation", stdout.String())
+	}
+}
+
+func TestAddMultiSkillRepoPromptsOnTTYDespiteBrokenSibling(t *testing.T) {
+	t.Parallel()
+
+	repo := testutil.NewMultiSkillRepo(t, "skill-pack", []testutil.SkillSpec{
+		{Path: ".", Name: "broken-root"},
+		{Path: filepath.Join("skills", "alpha-skill"), Name: "alpha-skill"},
+		{Path: filepath.Join("skills", "beta-skill"), Name: "beta-skill"},
+	})
+	repoPathByURL.Store(repo.URL, repo.Path)
+
+	rootSkillPath := filepath.Join(repo.Path, "SKILL.md")
+	if err := os.WriteFile(rootSkillPath, []byte(`---
+name: broken-root
+description: [unterminated
+---
+`), 0o644); err != nil {
+		t.Fatalf("WriteFile(root broken SKILL.md) error = %v", err)
+	}
+	testutil.RunGit(t, repo.Path, "add", ".")
+	testutil.RunGit(t, repo.Path, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "break root sibling")
+
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	if err := manifest.WriteFile(filepath.Join(projectDir, manifest.FileName), manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills:  []manifest.Skill{},
+	}); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	cmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &stdout,
+		Stderr:     &bytes.Buffer{},
+		IsTTY:      func() bool { return true },
+		PromptMultiSelect: func(req MultiSelectRequest) ([]string, error) {
+			if !reflect.DeepEqual(req.Options, []string{"alpha-skill", "beta-skill"}) {
+				t.Fatalf("prompt options = %#v, want only valid discovered skills", req.Options)
+			}
+			return []string{"beta-skill"}, nil
+		},
+	})
+	cmd.SetArgs([]string{"add", repo.URL})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	doc, err := manifest.ReadFile(filepath.Join(projectDir, manifest.FileName))
+	if err != nil {
+		t.Fatalf("ReadFile(manifest) error = %v", err)
+	}
+	want := manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills: []manifest.Skill{
+			{Name: "beta-skill", Source: "git:" + repo.URL, UpstreamSkill: "beta-skill"},
+		},
+	}
+	if !reflect.DeepEqual(*doc, want) {
+		t.Fatalf("manifest = %#v, want %#v", *doc, want)
 	}
 	if !strings.Contains(stdout.String(), "added beta-skill") {
 		t.Fatalf("stdout = %q, want add confirmation", stdout.String())

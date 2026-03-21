@@ -79,6 +79,40 @@ allowed-tools:
 	}
 }
 
+func TestDiscoverNameAllowsOtherwiseInvalidSkillMetadata(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	writeSkillFile(t, dir, `---
+name: repo-map
+version: 1.1.0
+---
+`)
+
+	name, err := DiscoverName(dir)
+	if err != nil {
+		t.Fatalf("DiscoverName() error = %v", err)
+	}
+	if name != "repo-map" {
+		t.Fatalf("DiscoverName() = %q, want repo-map", name)
+	}
+}
+
+func TestDiscoverCandidateNameRecoversNameFromMalformedFrontmatter(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	writeSkillFile(t, dir, `---
+name: repo-map
+description: [unterminated
+---
+`)
+
+	if got := DiscoverCandidateName(dir); got != "repo-map" {
+		t.Fatalf("DiscoverCandidateName() = %q, want repo-map", got)
+	}
+}
+
 func TestValidateDirWithWarningsReportsStrictSpecMismatches(t *testing.T) {
 	t.Parallel()
 

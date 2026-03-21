@@ -82,6 +82,66 @@ func ValidateDir(dir string, expectedName string) (*Metadata, error) {
 	return meta, err
 }
 
+// DiscoverName extracts only the declared skill name from SKILL.md.
+func DiscoverName(dir string) (string, error) {
+	path := filepath.Join(dir, FileName)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("invalid skill: missing %s", path)
+		}
+		return "", fmt.Errorf("read %s: %w", path, err)
+	}
+
+	frontmatter, err := extractFrontmatter(data)
+	if err != nil {
+		return "", fmt.Errorf("invalid skill %s: %w", path, err)
+	}
+
+	root, err := parseFrontmatterNode(frontmatter)
+	if err != nil {
+		return "", fmt.Errorf("invalid skill %s: parse YAML frontmatter: %w", path, err)
+	}
+
+	var meta struct {
+		Name string `yaml:"name"`
+	}
+	if err := root.Decode(&meta); err != nil {
+		return "", fmt.Errorf("invalid skill %s: parse YAML frontmatter: %w", path, err)
+	}
+	if strings.TrimSpace(meta.Name) == "" {
+		return "", fmt.Errorf("invalid skill %s: name is required", path)
+	}
+	return meta.Name, nil
+}
+
+// DiscoverCandidateName best-effort extracts a declared skill name from
+// SKILL.md, even when the full document is malformed. It is only used to map
+// explicit user selections back to invalid discovered skills.
+func DiscoverCandidateName(dir string) string {
+	path := filepath.Join(dir, FileName)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+
+	frontmatter, err := extractFrontmatter(data)
+	if err != nil {
+		return ""
+	}
+
+	if root, err := parseFrontmatterNode(frontmatter); err == nil {
+		var meta struct {
+			Name string `yaml:"name"`
+		}
+		if err := root.Decode(&meta); err == nil && strings.TrimSpace(meta.Name) != "" {
+			return strings.TrimSpace(meta.Name)
+		}
+	}
+
+	return discoverCandidateNameFromRawFrontmatter(frontmatter)
+}
+
 // ValidateDirWithWarnings validates the SKILL.md file for dir, returning
 // compatibility errors plus warnings for strict Agent Skills spec mismatches.
 func ValidateDirWithWarnings(dir string, expectedName string) (*Metadata, []ValidationWarning, error) {
@@ -190,6 +250,35 @@ func parseFrontmatterNode(frontmatter []byte) (*yaml.Node, error) {
 		return nil, fmt.Errorf("frontmatter must be a YAML mapping")
 	}
 	return root, nil
+}
+
+func discoverCandidateNameFromRawFrontmatter(frontmatter []byte) string {
+	for _, line := range strings.Split(strings.ReplaceAll(string(frontmatter), "\r\n", "\n"), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if strings.TrimLeft(line, " \t") != line {
+			continue
+		}
+		if !strings.HasPrefix(line, "name:") {
+			continue
+		}
+
+		raw := strings.TrimSpace(strings.TrimPrefix(line, "name:"))
+		if raw == "" || raw == "|" || raw == ">" || strings.HasPrefix(raw, "[") || strings.HasPrefix(raw, "{") {
+			return ""
+		}
+		if comment := strings.Index(raw, " #"); comment >= 0 {
+			raw = strings.TrimSpace(raw[:comment])
+		}
+		if len(raw) >= 2 {
+			if (raw[0] == '"' && raw[len(raw)-1] == '"') || (raw[0] == '\'' && raw[len(raw)-1] == '\'') {
+				raw = raw[1 : len(raw)-1]
+			}
+		}
+		return strings.TrimSpace(raw)
+	}
+	return ""
 }
 
 func strictWarnings(meta Metadata, path string, root *yaml.Node) []ValidationWarning {

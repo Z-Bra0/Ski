@@ -43,7 +43,7 @@ func newAddCmd(opts Options) *cobra.Command {
 			if len(selected) == 0 {
 				selected = append(selected, src.Skills...)
 			}
-			added, warnings, err := svc.AddSelected(args[0], selected, name)
+			added, warnings, err := svc.AddSelected(args[0], selected, name, addAll)
 			if err != nil {
 				var multiErr app.MultiSkillSelectionError
 				if !errors.As(err, &multiErr) {
@@ -54,7 +54,7 @@ func newAddCmd(opts Options) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				added, warnings, err = svc.AddSelected(args[0], selected, name)
+				added, warnings, err = svc.AddSelected(args[0], selected, name, addAll)
 				if err != nil {
 					return err
 				}
