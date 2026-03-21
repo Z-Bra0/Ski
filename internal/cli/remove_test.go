@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -205,6 +206,96 @@ func TestRemoveWithPerSkillTargetOverride(t *testing.T) {
 
 	// Global target symlink was never created, so there is nothing to assert
 	// about it — but the remove must not have errored.
+}
+
+func TestRemoveTargetFlagKeepsSkillInRemainingTargets(t *testing.T) {
+	t.Parallel()
+
+	repoPath, _ := createGitRepo(t, "repo-map", "repo-map")
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	if err := manifest.WriteFile(filepath.Join(projectDir, manifest.FileName), manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills:  []manifest.Skill{},
+	}); err != nil {
+		t.Fatalf("WriteFile(manifest) error = %v", err)
+	}
+
+	addCmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	addCmd.SetArgs([]string{"add", "git:" + repoPath})
+	if err := addCmd.Execute(); err != nil {
+		t.Fatalf("first add Execute() error = %v", err)
+	}
+
+	addTargetCmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	addTargetCmd.SetArgs([]string{"add", "git:" + repoPath, "--target", "codex"})
+	if err := addTargetCmd.Execute(); err != nil {
+		t.Fatalf("second add Execute() error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	removeTargetCmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &stdout,
+		Stderr:     &bytes.Buffer{},
+	})
+	removeTargetCmd.SetArgs([]string{"remove", "repo-map", "--target", "codex"})
+	if err := removeTargetCmd.Execute(); err != nil {
+		t.Fatalf("remove Execute() error = %v", err)
+	}
+
+	doc, err := manifest.ReadFile(filepath.Join(projectDir, manifest.FileName))
+	if err != nil {
+		t.Fatalf("ReadFile(manifest) error = %v", err)
+	}
+	wantManifest := manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills: []manifest.Skill{
+			{
+				Name:          "repo-map",
+				Source:        "git:" + repoPath,
+				UpstreamSkill: "repo-map",
+			},
+		},
+	}
+	if !reflect.DeepEqual(*doc, wantManifest) {
+		t.Fatalf("manifest = %#v, want %#v", *doc, wantManifest)
+	}
+
+	lf, err := lockfile.ReadFile(lockfile.Path(projectDir))
+	if err != nil {
+		t.Fatalf("ReadFile(lockfile) error = %v", err)
+	}
+	if len(lf.Skills) != 1 {
+		t.Fatalf("lockfile skills = %#v, want one entry", lf.Skills)
+	}
+	if !reflect.DeepEqual(lf.Skills[0].Targets, []string{"claude"}) {
+		t.Fatalf("lockfile targets = %#v, want [claude]", lf.Skills[0].Targets)
+	}
+
+	if _, err := os.Lstat(filepath.Join(projectDir, ".codex", "skills", "repo-map")); !os.IsNotExist(err) {
+		t.Fatalf("codex symlink still exists after targeted remove")
+	}
+	if _, err := os.Lstat(filepath.Join(projectDir, ".claude", "skills", "repo-map")); err != nil {
+		t.Fatalf("claude symlink missing after targeted remove: %v", err)
+	}
+	if got := stdout.String(); !strings.Contains(got, `removed skill "repo-map" from targets: codex`) {
+		t.Fatalf("stdout = %q, want targeted remove confirmation", got)
+	}
 }
 
 func TestRemoveCleansStaleTargetsFromLockfile(t *testing.T) {

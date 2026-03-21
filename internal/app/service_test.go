@@ -389,7 +389,7 @@ func TestRemoveRollsBackAfterUnlinkFailure(t *testing.T) {
 		},
 	}
 
-	err := svc.Remove(skillName)
+	err := svc.Remove(skillName, nil)
 	if err == nil {
 		t.Fatal("Remove() error = nil, want forced unlink failure")
 	}

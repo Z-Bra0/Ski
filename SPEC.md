@@ -203,6 +203,8 @@ If `--skill <name>` is provided, only those discovered skills are added. `--skil
 
 If `--target <name>` is provided, `ski add` writes those targets onto each added skill entry and uses them instead of the manifest-level top-level `targets`. `--target` may be repeated.
 
+If the selected skill already exists in the active manifest with the same identity, `ski add --target ...` extends that existing skill into the requested additional targets instead of failing as a duplicate.
+
 If no `--skill` is provided and the repository contains exactly one skill, `ski add` adds that skill automatically.
 
 If no `--skill` is provided and the repository contains multiple skills:
@@ -252,6 +254,10 @@ No args: updates all skills to latest commit, rewrites lockfile.
 ### `ski remove <skill>`
 
 Removes from the active manifest, removes from the active lockfile, and unlinks from all active-scope targets.
+
+If `--target <name>` is provided, `ski remove` unlinks only those targets from the selected skill and updates that skill's manifest and lockfile targets instead of deleting the skill entry entirely.
+
+If removing the requested targets leaves the skill with no effective targets, `ski remove --target ...` removes the skill entry entirely.
 
 Store contents are left in `~/.ski/store/`.
 
