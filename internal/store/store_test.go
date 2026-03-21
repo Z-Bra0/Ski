@@ -111,6 +111,77 @@ func TestFindGitIntegrityCoversWholeRepoSnapshotForSelectedSkill(t *testing.T) {
 	}
 }
 
+func TestFindGitReportsMalformedStoredSelectedSkill(t *testing.T) {
+	t.Parallel()
+
+	repoPath := createMultiSkillRepoWithSharedFile(t)
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+	spec := source.Git{
+		URL:    repoPath,
+		Skills: []string{"alpha-skill"},
+	}
+
+	stored, err := EnsureGit(projectDir, homeDir, spec, "alpha-skill")
+	if err != nil {
+		t.Fatalf("EnsureGit() error = %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(stored.Path, "SKILL.md"), []byte(`---
+name: alpha-skill
+description: [unterminated
+---
+`), 0o644); err != nil {
+		t.Fatalf("WriteFile(SKILL.md) error = %v", err)
+	}
+
+	_, err = FindGit(homeDir, spec, stored.Commit, "alpha-skill")
+	if err == nil {
+		t.Fatal("FindGit() error = nil, want malformed selected skill error")
+	}
+	if strings.Contains(err.Error(), `skill "alpha-skill" not found in repository`) {
+		t.Fatalf("FindGit() error = %v, want malformed skill error instead of not found", err)
+	}
+	if !strings.Contains(err.Error(), "parse YAML frontmatter") {
+		t.Fatalf("FindGit() error = %v, want YAML parse error", err)
+	}
+}
+
+func TestDiscoverGitRewritesInvalidOnlyRepoErrorsToStorePath(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	repoPath := filepath.Join(root, "skill-pack")
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoPath, "SKILL.md"), []byte(`---
+name: repo-map
+description: [unterminated
+---
+`), 0o644); err != nil {
+		t.Fatalf("WriteFile(SKILL.md) error = %v", err)
+	}
+	runGitTest(t, root, "init", repoPath)
+	runGitTest(t, repoPath, "add", ".")
+	runGitTest(t, repoPath, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "broken skill")
+
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+	spec := source.Git{URL: repoPath}
+
+	_, err := DiscoverGit(projectDir, homeDir, spec)
+	if err == nil {
+		t.Fatal("DiscoverGit() error = nil, want malformed skill error")
+	}
+	if strings.Contains(err.Error(), "/checkout/SKILL.md") {
+		t.Fatalf("DiscoverGit() error = %v, want rewritten store path instead of temp checkout path", err)
+	}
+	if !strings.Contains(err.Error(), filepath.Join(homeDir, ".ski", "store", "git", "skill-pack")) {
+		t.Fatalf("DiscoverGit() error = %v, want stable store path", err)
+	}
+}
+
 func createMultiSkillRepoWithSharedFile(t *testing.T) string {
 	t.Helper()
 

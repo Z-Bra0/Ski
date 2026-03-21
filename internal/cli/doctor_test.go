@@ -17,7 +17,7 @@ func TestDoctorReportsHealthyProject(t *testing.T) {
 	projectDir := t.TempDir()
 	homeDir := t.TempDir()
 
-	if err := manifest.WriteFile(filepath.Join(projectDir, manifest.FileName), manifest.Manifest{
+	installManifestForTest(t, projectDir, homeDir, manifest.Manifest{
 		Version: 1,
 		Targets: []string{"claude"},
 		Skills: []manifest.Skill{
@@ -27,20 +27,7 @@ func TestDoctorReportsHealthyProject(t *testing.T) {
 				Targets: []string{"codex"},
 			},
 		},
-	}); err != nil {
-		t.Fatalf("WriteFile(manifest) error = %v", err)
-	}
-
-	installCmd := NewRootCmd(Options{
-		Getwd:      func() (string, error) { return projectDir, nil },
-		GetHomeDir: func() (string, error) { return homeDir, nil },
-		Stdout:     &bytes.Buffer{},
-		Stderr:     &bytes.Buffer{},
 	})
-	installCmd.SetArgs([]string{"install"})
-	if err := installCmd.Execute(); err != nil {
-		t.Fatalf("install Execute() error = %v", err)
-	}
 
 	var stdout bytes.Buffer
 	doctorCmd := NewRootCmd(Options{
@@ -114,7 +101,7 @@ func TestDoctorSupportsCustomTargetFolder(t *testing.T) {
 	homeDir := t.TempDir()
 	customTarget := "dir:./agent-skills/claude"
 
-	if err := manifest.WriteFile(filepath.Join(projectDir, manifest.FileName), manifest.Manifest{
+	installManifestForTest(t, projectDir, homeDir, manifest.Manifest{
 		Version: 1,
 		Targets: []string{customTarget},
 		Skills: []manifest.Skill{
@@ -123,20 +110,7 @@ func TestDoctorSupportsCustomTargetFolder(t *testing.T) {
 				Source: "git:" + repoPath + "@v1.0.0",
 			},
 		},
-	}); err != nil {
-		t.Fatalf("WriteFile(manifest) error = %v", err)
-	}
-
-	installCmd := NewRootCmd(Options{
-		Getwd:      func() (string, error) { return projectDir, nil },
-		GetHomeDir: func() (string, error) { return homeDir, nil },
-		Stdout:     &bytes.Buffer{},
-		Stderr:     &bytes.Buffer{},
 	})
-	installCmd.SetArgs([]string{"install"})
-	if err := installCmd.Execute(); err != nil {
-		t.Fatalf("install Execute() error = %v", err)
-	}
 
 	var stdout bytes.Buffer
 	doctorCmd := NewRootCmd(Options{
@@ -181,14 +155,11 @@ func TestDoctorReportsIntegrityAndSymlinkProblems(t *testing.T) {
 		t.Fatalf("add Execute() error = %v", err)
 	}
 
-	storePath := filepath.Join(homeDir, ".ski", "store", "git", "repo-map", commit)
-	if err := os.WriteFile(filepath.Join(storePath, "SKILL.md"), []byte(`---
+	overwriteStoredSkillFile(t, homeDir, "repo-map", commit, "SKILL.md", `---
 name: repo-map
 description: tampered
 ---
-`), 0o644); err != nil {
-		t.Fatalf("WriteFile(SKILL.md) error = %v", err)
-	}
+`)
 
 	linkPath := filepath.Join(projectDir, ".claude", "skills", "repo-map")
 	if err := os.Remove(linkPath); err != nil {
@@ -219,6 +190,55 @@ description: tampered
 	}
 	if !strings.Contains(out, "symlink points to") {
 		t.Fatalf("stdout = %q, want symlink mismatch", out)
+	}
+}
+
+func TestDoctorReportsMalformedStoredSelectedSkill(t *testing.T) {
+	t.Parallel()
+
+	repoPath, commit := createGitRepo(t, "repo-map", "repo-map")
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	installManifestForTest(t, projectDir, homeDir, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills: []manifest.Skill{
+			{
+				Name:   "repo-map",
+				Source: "git:" + repoPath + "@v1.0.0",
+			},
+		},
+	})
+	overwriteStoredSkillFile(t, homeDir, "repo-map", commit, "SKILL.md", `---
+name: repo-map
+description: [unterminated
+---
+`)
+
+	var stdout bytes.Buffer
+	doctorCmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &stdout,
+		Stderr:     &bytes.Buffer{},
+	})
+	doctorCmd.SetArgs([]string{"doctor"})
+
+	err := doctorCmd.Execute()
+	if err == nil {
+		t.Fatal("doctor Execute() error = nil, want findings")
+	}
+	if !strings.Contains(err.Error(), "doctor found 1 issues") {
+		t.Fatalf("doctor error = %v, want issue summary", err)
+	}
+
+	out := stdout.String()
+	if strings.Contains(out, `skill "repo-map" not found in repository`) {
+		t.Fatalf("stdout = %q, want malformed skill error instead of not found", out)
+	}
+	if !strings.Contains(out, "parse YAML frontmatter") {
+		t.Fatalf("stdout = %q, want malformed skill finding", out)
 	}
 }
 

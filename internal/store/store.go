@@ -30,9 +30,10 @@ type Result struct {
 
 // RepoResult describes a discovered repository snapshot and its skills.
 type RepoResult struct {
-	Commit string
-	Root   string
-	Skills []DiscoveredSkill
+	Commit        string
+	Root          string
+	Skills        []DiscoveredSkill
+	InvalidSkills []InvalidSkill
 }
 
 // DiscoveredSkill identifies one skill directory inside a repository snapshot.
@@ -40,6 +41,19 @@ type DiscoveredSkill struct {
 	Name         string
 	RelativePath string
 	Path         string
+}
+
+// InvalidSkill describes a discovered SKILL.md that exists but could not be parsed or validated.
+type InvalidSkill struct {
+	CandidateName string
+	Path          string
+	Err           error
+}
+
+type discoveredSkillNameResult struct {
+	Name       string
+	Found      bool
+	InvalidErr error
 }
 
 // DiscoverGit fetches or loads a git repository snapshot from the shared store.
@@ -92,46 +106,82 @@ func DiscoverGit(projectRoot, homeDir string, spec source.Git) (RepoResult, erro
 		return RepoResult{}, err
 	}
 
-	skills, err := discoverSkills(checkoutDir)
+	skills, invalidSkills, err := discoverSkills(checkoutDir)
 	if err != nil {
 		return RepoResult{}, err
 	}
 	if len(skills) == 0 {
+		if len(invalidSkills) > 0 {
+			rewritten, err := storeInvalidGitSnapshot(checkoutDir, storePath, invalidSkills)
+			if err != nil {
+				return RepoResult{}, err
+			}
+			return RepoResult{}, rewritten[0].Err
+		}
 		return RepoResult{}, fmt.Errorf("no skills found in repository")
 	}
 
+	if err := persistGitSnapshot(checkoutDir, storePath); err != nil {
+		return RepoResult{}, err
+	}
+
+	return buildRepoResult(
+		storePath,
+		commit,
+		skills,
+		rewriteInvalidSkillPaths(invalidSkills, checkoutDir, storePath),
+	), nil
+}
+
+func storeInvalidGitSnapshot(checkoutDir, storePath string, invalidSkills []InvalidSkill) ([]InvalidSkill, error) {
+	if err := persistGitSnapshot(checkoutDir, storePath); err != nil {
+		return nil, err
+	}
+	return rewriteInvalidSkillPaths(invalidSkills, checkoutDir, storePath), nil
+}
+
+func persistGitSnapshot(checkoutDir, storePath string) error {
 	if err := os.MkdirAll(filepath.Dir(storePath), 0o755); err != nil {
-		return RepoResult{}, fmt.Errorf("mkdir %s: %w", filepath.Dir(storePath), err)
+		return fmt.Errorf("mkdir %s: %w", filepath.Dir(storePath), err)
 	}
 	// The store keeps plain snapshots, not working clones with git metadata.
 	if err := os.RemoveAll(filepath.Join(checkoutDir, ".git")); err != nil {
-		return RepoResult{}, fmt.Errorf("remove git metadata: %w", err)
+		return fmt.Errorf("remove git metadata: %w", err)
 	}
 	if err := moveDirIntoStore(checkoutDir, storePath); err != nil {
-		return RepoResult{}, fmt.Errorf("move checkout into store: %w", err)
+		return fmt.Errorf("move checkout into store: %w", err)
 	}
-
-	return buildRepoResult(storePath, commit, skills), nil
+	return nil
 }
 
 // EnsureGit ensures a selected skill is present in the store and returns its path.
 func EnsureGit(projectRoot, homeDir string, spec source.Git, expectedName string) (Result, error) {
+	result, _, err := EnsureGitWithWarnings(projectRoot, homeDir, spec, expectedName)
+	return result, err
+}
+
+// EnsureGitWithWarnings ensures a selected skill is present in the store and
+// returns strict-spec warnings for the selected skill only.
+func EnsureGitWithWarnings(projectRoot, homeDir string, spec source.Git, expectedName string) (Result, []skill.ValidationWarning, error) {
 	repo, err := DiscoverGit(projectRoot, homeDir, spec)
 	if err != nil {
-		return Result{}, err
+		return Result{}, nil, err
 	}
 
-	selected, err := resolveDiscoveredSkill(repo.Skills, spec, expectedName)
+	selected, err := resolveSelectedSkill(repo, spec, expectedName)
 	if err != nil {
-		return Result{}, err
+		return Result{}, nil, err
 	}
+	if _, warnings, err := skill.ValidateDirWithWarnings(selected.Path, selected.Name); err != nil {
+		return Result{}, nil, err
+	} else {
+		integrity, err := HashDir(repo.Root)
+		if err != nil {
+			return Result{}, nil, fmt.Errorf("hash %s: %w", repo.Root, err)
+		}
 
-	integrity, err := HashDir(repo.Root)
-	if err != nil {
-		return Result{}, fmt.Errorf("hash %s: %w", repo.Root, err)
+		return Result{Commit: repo.Commit, Integrity: integrity, Path: selected.Path}, warnings, nil
 	}
-
-	return Result{Commit: repo.Commit, Integrity: integrity, Path: selected.Path}, nil
 }
 
 // FindGit locates an already-stored git snapshot at a specific commit.
@@ -147,7 +197,7 @@ func FindGit(homeDir string, spec source.Git, commit string, expectedName string
 		return Result{}, err
 	}
 
-	selected, err := resolveDiscoveredSkill(repo.Skills, spec, expectedName)
+	selected, err := resolveSelectedSkill(repo, spec, expectedName)
 	if err != nil {
 		return Result{}, err
 	}
@@ -184,17 +234,20 @@ func loadStoredRepo(storePath, commit string) (RepoResult, error) {
 		return RepoResult{}, fmt.Errorf("store path %s is not a directory", storePath)
 	}
 
-	skills, err := discoverSkills(storePath)
+	skills, invalidSkills, err := discoverSkills(storePath)
 	if err != nil {
 		return RepoResult{}, err
 	}
 	if len(skills) == 0 {
+		if len(invalidSkills) > 0 {
+			return RepoResult{}, invalidSkills[0].Err
+		}
 		return RepoResult{}, fmt.Errorf("no skills found in store snapshot %s", storePath)
 	}
-	return buildRepoResult(storePath, commit, skills), nil
+	return buildRepoResult(storePath, commit, skills, invalidSkills), nil
 }
 
-func buildRepoResult(root, commit string, skills []DiscoveredSkill) RepoResult {
+func buildRepoResult(root, commit string, skills []DiscoveredSkill, invalidSkills []InvalidSkill) RepoResult {
 	out := make([]DiscoveredSkill, 0, len(skills))
 	for _, discovered := range skills {
 		rel := discovered.RelativePath
@@ -207,28 +260,65 @@ func buildRepoResult(root, commit string, skills []DiscoveredSkill) RepoResult {
 			Path:         filepath.Join(root, rel),
 		})
 	}
-	return RepoResult{Commit: commit, Root: root, Skills: out}
+	return RepoResult{
+		Commit:        commit,
+		Root:          root,
+		Skills:        out,
+		InvalidSkills: append([]InvalidSkill(nil), invalidSkills...),
+	}
 }
 
-func discoverSkills(root string) ([]DiscoveredSkill, error) {
+func rewriteInvalidSkillPaths(invalidSkills []InvalidSkill, fromRoot, toRoot string) []InvalidSkill {
+	if len(invalidSkills) == 0 || fromRoot == toRoot {
+		return append([]InvalidSkill(nil), invalidSkills...)
+	}
+
+	out := make([]InvalidSkill, 0, len(invalidSkills))
+	for _, invalid := range invalidSkills {
+		rewritten := invalid
+		oldPath := invalid.Path
+		if rel, err := filepath.Rel(fromRoot, invalid.Path); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			rewritten.Path = filepath.Join(toRoot, rel)
+		}
+		if oldPath != rewritten.Path && invalid.Err != nil {
+			rewritten.Err = fmt.Errorf(strings.ReplaceAll(invalid.Err.Error(), oldPath, rewritten.Path))
+		}
+		out = append(out, rewritten)
+	}
+	return out
+}
+
+func discoverSkills(root string) ([]DiscoveredSkill, []InvalidSkill, error) {
 	skills := make([]DiscoveredSkill, 0)
+	invalidSkills := make([]InvalidSkill, 0)
 	seen := make(map[string]string)
 
 	var walk func(dir string, depth int) error
 	walk = func(dir string, depth int) error {
-		if meta, found, err := loadSkillMetadata(dir); err != nil {
+		result, err := loadDiscoveredSkillName(dir)
+		if err != nil {
 			return err
-		} else if found {
+		} else if result.InvalidErr != nil {
+			candidateName := result.Name
+			if candidateName == "" {
+				candidateName = fallbackCandidateSkillName(root, dir)
+			}
+			invalidSkills = append(invalidSkills, InvalidSkill{
+				CandidateName: candidateName,
+				Path:          filepath.Join(dir, skill.FileName),
+				Err:           result.InvalidErr,
+			})
+		} else if result.Found {
 			rel, err := filepath.Rel(root, dir)
 			if err != nil {
 				return fmt.Errorf("derive relative path for %s: %w", dir, err)
 			}
-			if previous, ok := seen[meta.Name]; ok {
-				return fmt.Errorf("duplicate skill name %q found at %s and %s", meta.Name, previous, rel)
+			if previous, ok := seen[result.Name]; ok {
+				return fmt.Errorf("duplicate skill name %q found at %s and %s", result.Name, previous, rel)
 			}
-			seen[meta.Name] = rel
+			seen[result.Name] = rel
 			skills = append(skills, DiscoveredSkill{
-				Name:         meta.Name,
+				Name:         result.Name,
 				RelativePath: rel,
 				Path:         dir,
 			})
@@ -257,29 +347,73 @@ func discoverSkills(root string) ([]DiscoveredSkill, error) {
 	}
 
 	if err := walk(root, 0); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	slices.SortFunc(skills, func(a, b DiscoveredSkill) int {
 		return strings.Compare(a.Name, b.Name)
 	})
-	return skills, nil
+	slices.SortFunc(invalidSkills, func(a, b InvalidSkill) int {
+		return strings.Compare(a.Path, b.Path)
+	})
+	return skills, invalidSkills, nil
 }
 
-func loadSkillMetadata(dir string) (*skill.Metadata, bool, error) {
+func loadDiscoveredSkillName(dir string) (discoveredSkillNameResult, error) {
 	path := filepath.Join(dir, skill.FileName)
 	if _, err := os.Stat(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, false, nil
+			return discoveredSkillNameResult{}, nil
 		}
-		return nil, false, fmt.Errorf("stat %s: %w", path, err)
+		return discoveredSkillNameResult{}, fmt.Errorf("stat %s: %w", path, err)
 	}
 
-	meta, err := skill.ValidateDir(dir, "")
+	name, err := skill.DiscoverName(dir)
 	if err != nil {
-		return nil, false, err
+		return discoveredSkillNameResult{
+			Name:       skill.DiscoverCandidateName(dir),
+			InvalidErr: err,
+		}, nil
 	}
-	return meta, true, nil
+	return discoveredSkillNameResult{
+		Name:  name,
+		Found: true,
+	}, nil
+}
+
+func fallbackCandidateSkillName(root, dir string) string {
+	rel, err := filepath.Rel(root, dir)
+	if err == nil && rel != "." {
+		return filepath.Base(dir)
+	}
+	return filepath.Base(root)
+}
+
+func matchInvalidSelectedSkill(repo RepoResult, spec source.Git, expectedName string) error {
+	requested := expectedName
+	if len(spec.Skills) == 1 {
+		requested = spec.Skills[0]
+	}
+	if requested == "" {
+		return nil
+	}
+	for _, invalid := range repo.InvalidSkills {
+		if invalid.CandidateName == requested {
+			return invalid.Err
+		}
+	}
+	return nil
+}
+
+func resolveSelectedSkill(repo RepoResult, spec source.Git, expectedName string) (DiscoveredSkill, error) {
+	selected, err := resolveDiscoveredSkill(repo.Skills, spec, expectedName)
+	if err != nil {
+		if invalidErr := matchInvalidSelectedSkill(repo, spec, expectedName); invalidErr != nil {
+			return DiscoveredSkill{}, invalidErr
+		}
+		return DiscoveredSkill{}, err
+	}
+	return selected, nil
 }
 
 func resolveDiscoveredSkill(skills []DiscoveredSkill, spec source.Git, expectedName string) (DiscoveredSkill, error) {
