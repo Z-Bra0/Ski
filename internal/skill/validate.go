@@ -85,34 +85,19 @@ func ValidateDir(dir string, expectedName string) (*Metadata, error) {
 // DiscoverName extracts only the declared skill name from SKILL.md.
 func DiscoverName(dir string) (string, error) {
 	path := filepath.Join(dir, FileName)
-	data, err := os.ReadFile(path)
+	_, root, err := loadSkillFrontmatter(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return "", fmt.Errorf("invalid skill: missing %s", path)
-		}
-		return "", fmt.Errorf("read %s: %w", path, err)
+		return "", err
 	}
 
-	frontmatter, err := extractFrontmatter(data)
+	name, err := decodeSkillName(root)
 	if err != nil {
 		return "", fmt.Errorf("invalid skill %s: %w", path, err)
 	}
-
-	root, err := parseFrontmatterNode(frontmatter)
-	if err != nil {
-		return "", fmt.Errorf("invalid skill %s: parse YAML frontmatter: %w", path, err)
-	}
-
-	var meta struct {
-		Name string `yaml:"name"`
-	}
-	if err := root.Decode(&meta); err != nil {
-		return "", fmt.Errorf("invalid skill %s: parse YAML frontmatter: %w", path, err)
-	}
-	if strings.TrimSpace(meta.Name) == "" {
+	if strings.TrimSpace(name) == "" {
 		return "", fmt.Errorf("invalid skill %s: name is required", path)
 	}
-	return meta.Name, nil
+	return name, nil
 }
 
 // DiscoverCandidateName best-effort extracts a declared skill name from
@@ -120,22 +105,10 @@ func DiscoverName(dir string) (string, error) {
 // explicit user selections back to invalid discovered skills.
 func DiscoverCandidateName(dir string) string {
 	path := filepath.Join(dir, FileName)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-
-	frontmatter, err := extractFrontmatter(data)
-	if err != nil {
-		return ""
-	}
-
-	if root, err := parseFrontmatterNode(frontmatter); err == nil {
-		var meta struct {
-			Name string `yaml:"name"`
-		}
-		if err := root.Decode(&meta); err == nil && strings.TrimSpace(meta.Name) != "" {
-			return strings.TrimSpace(meta.Name)
+	frontmatter, root, err := loadSkillFrontmatter(path)
+	if err == nil {
+		if name, decodeErr := decodeSkillName(root); decodeErr == nil && strings.TrimSpace(name) != "" {
+			return strings.TrimSpace(name)
 		}
 	}
 
@@ -146,22 +119,9 @@ func DiscoverCandidateName(dir string) string {
 // compatibility errors plus warnings for strict Agent Skills spec mismatches.
 func ValidateDirWithWarnings(dir string, expectedName string) (*Metadata, []ValidationWarning, error) {
 	path := filepath.Join(dir, FileName)
-	data, err := os.ReadFile(path)
+	_, root, err := loadSkillFrontmatter(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil, fmt.Errorf("invalid skill: missing %s", path)
-		}
-		return nil, nil, fmt.Errorf("read %s: %w", path, err)
-	}
-
-	frontmatter, err := extractFrontmatter(data)
-	if err != nil {
-		return nil, nil, fmt.Errorf("invalid skill %s: %w", path, err)
-	}
-
-	root, err := parseFrontmatterNode(frontmatter)
-	if err != nil {
-		return nil, nil, fmt.Errorf("invalid skill %s: parse YAML frontmatter: %w", path, err)
+		return nil, nil, err
 	}
 
 	var meta Metadata
@@ -174,6 +134,38 @@ func ValidateDirWithWarnings(dir string, expectedName string) (*Metadata, []Vali
 	}
 
 	return &meta, strictWarnings(meta, path, root), nil
+}
+
+func loadSkillFrontmatter(path string) ([]byte, *yaml.Node, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil, fmt.Errorf("invalid skill: missing %s", path)
+		}
+		return nil, nil, fmt.Errorf("read %s: %w", path, err)
+	}
+
+	frontmatter, err := extractFrontmatter(data)
+	if err != nil {
+		return frontmatter, nil, fmt.Errorf("invalid skill %s: %w", path, err)
+	}
+
+	root, err := parseFrontmatterNode(frontmatter)
+	if err != nil {
+		return frontmatter, nil, fmt.Errorf("invalid skill %s: parse YAML frontmatter: %w", path, err)
+	}
+
+	return frontmatter, root, nil
+}
+
+func decodeSkillName(root *yaml.Node) (string, error) {
+	var meta struct {
+		Name string `yaml:"name"`
+	}
+	if err := root.Decode(&meta); err != nil {
+		return "", fmt.Errorf("parse YAML frontmatter: %w", err)
+	}
+	return meta.Name, nil
 }
 
 // Validate checks the metadata against ski's compatibility requirements.

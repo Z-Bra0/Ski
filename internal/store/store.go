@@ -50,6 +50,12 @@ type InvalidSkill struct {
 	Err           error
 }
 
+type discoveredSkillNameResult struct {
+	Name       string
+	Found      bool
+	InvalidErr error
+}
+
 // DiscoverGit fetches or loads a git repository snapshot from the shared store.
 func DiscoverGit(projectRoot, homeDir string, spec source.Git) (RepoResult, error) {
 	storeKey, err := spec.DeriveName()
@@ -288,29 +294,30 @@ func discoverSkills(root string) ([]DiscoveredSkill, []InvalidSkill, error) {
 
 	var walk func(dir string, depth int) error
 	walk = func(dir string, depth int) error {
-		if name, invalidErr, found, err := loadDiscoveredSkillName(dir); err != nil {
+		result, err := loadDiscoveredSkillName(dir)
+		if err != nil {
 			return err
-		} else if invalidErr != nil {
-			candidateName := name
+		} else if result.InvalidErr != nil {
+			candidateName := result.Name
 			if candidateName == "" {
 				candidateName = fallbackCandidateSkillName(root, dir)
 			}
 			invalidSkills = append(invalidSkills, InvalidSkill{
 				CandidateName: candidateName,
 				Path:          filepath.Join(dir, skill.FileName),
-				Err:           invalidErr,
+				Err:           result.InvalidErr,
 			})
-		} else if found {
+		} else if result.Found {
 			rel, err := filepath.Rel(root, dir)
 			if err != nil {
 				return fmt.Errorf("derive relative path for %s: %w", dir, err)
 			}
-			if previous, ok := seen[name]; ok {
-				return fmt.Errorf("duplicate skill name %q found at %s and %s", name, previous, rel)
+			if previous, ok := seen[result.Name]; ok {
+				return fmt.Errorf("duplicate skill name %q found at %s and %s", result.Name, previous, rel)
 			}
-			seen[name] = rel
+			seen[result.Name] = rel
 			skills = append(skills, DiscoveredSkill{
-				Name:         name,
+				Name:         result.Name,
 				RelativePath: rel,
 				Path:         dir,
 			})
@@ -351,20 +358,26 @@ func discoverSkills(root string) ([]DiscoveredSkill, []InvalidSkill, error) {
 	return skills, invalidSkills, nil
 }
 
-func loadDiscoveredSkillName(dir string) (string, error, bool, error) {
+func loadDiscoveredSkillName(dir string) (discoveredSkillNameResult, error) {
 	path := filepath.Join(dir, skill.FileName)
 	if _, err := os.Stat(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return "", nil, false, nil
+			return discoveredSkillNameResult{}, nil
 		}
-		return "", nil, false, fmt.Errorf("stat %s: %w", path, err)
+		return discoveredSkillNameResult{}, fmt.Errorf("stat %s: %w", path, err)
 	}
 
 	name, err := skill.DiscoverName(dir)
 	if err != nil {
-		return skill.DiscoverCandidateName(dir), err, false, nil
+		return discoveredSkillNameResult{
+			Name:       skill.DiscoverCandidateName(dir),
+			InvalidErr: err,
+		}, nil
 	}
-	return name, nil, true, nil
+	return discoveredSkillNameResult{
+		Name:  name,
+		Found: true,
+	}, nil
 }
 
 func fallbackCandidateSkillName(root, dir string) string {

@@ -238,7 +238,7 @@ func TestAddSupportsNameOverride(t *testing.T) {
 	}
 }
 
-func TestAddWarnsOnStrictSkillSpecMismatchesButSucceeds(t *testing.T) {
+func TestAddIgnoresUnselectedInvalidSkills(t *testing.T) {
 	t.Parallel()
 
 	repo := testutil.NewMultiSkillRepo(t, "gstack", []testutil.SkillSpec{
