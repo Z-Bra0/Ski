@@ -320,6 +320,59 @@ func TestUpdateSpecificSkillOnly(t *testing.T) {
 	}
 }
 
+func TestUpdateCheckAcceptsSkillReference(t *testing.T) {
+	t.Parallel()
+
+	repoA, oldCommitA := createGitRepo(t, "repo-map", "repo-map")
+	repoB, _ := createGitRepo(t, "audit-skill", "audit-skill")
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	if err := manifest.WriteFile(filepath.Join(projectDir, manifest.FileName), manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills:  []manifest.Skill{},
+	}); err != nil {
+		t.Fatalf("WriteFile(manifest) error = %v", err)
+	}
+
+	addCmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	addCmd.SetArgs([]string{"add", "git:" + repoA})
+	if err := addCmd.Execute(); err != nil {
+		t.Fatalf("add repoA Execute() error = %v", err)
+	}
+	addCmd.SetArgs([]string{"add", "git:" + repoB})
+	if err := addCmd.Execute(); err != nil {
+		t.Fatalf("add repoB Execute() error = %v", err)
+	}
+
+	newCommitA := advanceGitRepo(t, repoPathForURL(t, repoA), "repo-map", "second")
+
+	var stdout bytes.Buffer
+	checkCmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &stdout,
+		Stderr:     &bytes.Buffer{},
+	})
+	checkCmd.SetArgs([]string{"update", "@1", "--check"})
+	if err := checkCmd.Execute(); err != nil {
+		t.Fatalf("update --check Execute() error = %v", err)
+	}
+
+	if !strings.Contains(stdout.String(), "repo-map "+oldCommitA[:7]+" -> "+newCommitA[:7]) {
+		t.Fatalf("stdout = %q, want repo-map update line", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "audit-skill") {
+		t.Fatalf("stdout = %q, want no audit-skill update line", stdout.String())
+	}
+}
+
 func TestUpdateGlobalMissingSkillIncludesGlobalManifestPath(t *testing.T) {
 	t.Parallel()
 

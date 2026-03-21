@@ -20,7 +20,15 @@ func newInfoCmd(opts Options) *cobra.Command {
 				return err
 			}
 
-			info, err := svc.Info(args[0])
+			name, _, err := resolveSkillReferenceName(svc, args[0])
+			if err != nil {
+				return err
+			}
+			if name == "" {
+				name = args[0]
+			}
+
+			info, err := svc.Info(name)
 			if err != nil {
 				return err
 			}

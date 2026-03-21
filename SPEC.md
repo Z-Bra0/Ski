@@ -235,6 +235,8 @@ If the active lockfile does not exist yet, `ski install` resolves the manifest e
 
 Lists the skills declared in the active scope, including canonical source, upstream skill, locked commit, and effective targets.
 
+`ski list` prints a 1-based `#` column. Commands in the same scope may use `@N` to refer to those rows without repeating the skill name, for example `ski info @1`, `ski update @1`, `ski remove @1`, or `ski add @1 --target codex`.
+
 ### `ski info <skill>`
 
 Shows detailed state for one declared skill in the active scope, including canonical source, upstream skill, informational version, locked commit, integrity, resolved store path, and per-target link status.

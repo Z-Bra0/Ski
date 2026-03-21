@@ -427,6 +427,71 @@ func TestAddExtendsTargetsForExistingSkill(t *testing.T) {
 	}
 }
 
+func TestAddTargetOverrideAcceptsSkillReference(t *testing.T) {
+	t.Parallel()
+
+	repoPath, commit := createGitRepo(t, "repo-map", "repo-map")
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	path := filepath.Join(projectDir, manifest.FileName)
+	if err := manifest.WriteFile(path, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills:  []manifest.Skill{},
+	}); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	addCmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	addCmd.SetArgs([]string{"add", "git:" + repoPath})
+	if err := addCmd.Execute(); err != nil {
+		t.Fatalf("first Execute() error = %v", err)
+	}
+
+	cmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	cmd.SetArgs([]string{"add", "@1", "--target", "codex"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("second Execute() error = %v", err)
+	}
+
+	doc, err := manifest.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(manifest) error = %v", err)
+	}
+	if !reflect.DeepEqual(doc.Skills[0].Targets, []string{"claude", "codex"}) {
+		t.Fatalf("manifest skill targets = %#v, want [claude codex]", doc.Skills[0].Targets)
+	}
+
+	lf, err := lockfile.ReadFile(filepath.Join(projectDir, lockfile.FileName))
+	if err != nil {
+		t.Fatalf("ReadFile(lockfile) error = %v", err)
+	}
+	if !reflect.DeepEqual(lf.Skills[0].Targets, []string{"claude", "codex"}) {
+		t.Fatalf("lockfile targets = %#v, want [claude codex]", lf.Skills[0].Targets)
+	}
+
+	storePath := filepath.Join(homeDir, ".ski", "store", "git", "repo-map", commit)
+	codexLink := filepath.Join(projectDir, ".codex", "skills", "repo-map")
+	targetPath, err := os.Readlink(codexLink)
+	if err != nil {
+		t.Fatalf("Readlink(codex) error = %v", err)
+	}
+	if targetPath != storePath {
+		t.Fatalf("codex symlink target = %q, want %q", targetPath, storePath)
+	}
+}
+
 func TestAddIgnoresUnselectedInvalidSkills(t *testing.T) {
 	t.Parallel()
 

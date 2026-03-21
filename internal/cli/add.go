@@ -26,9 +26,42 @@ func newAddCmd(opts Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			src, err := source.ParseGit(args[0])
+			targetOverride, err := normalizeInitTargets(targets, svc, false)
 			if err != nil {
 				return err
+			}
+			src, err := source.ParseGit(args[0])
+			if err != nil {
+				refInfo, isRef, refErr := resolveSkillReferenceInfo(svc, args[0])
+				if refErr != nil {
+					return refErr
+				}
+				if !isRef {
+					return err
+				}
+				if len(targetOverride) == 0 {
+					return fmt.Errorf("skill references can only be used with --target")
+				}
+				if name != "" || addAll || len(skills) > 0 {
+					return fmt.Errorf("skill references cannot be combined with --name, --skill, or --all")
+				}
+
+				selected := []string(nil)
+				if refInfo.UpstreamSkill != "" {
+					selected = []string{refInfo.UpstreamSkill}
+				}
+				added, warnings, err := svc.AddSelected(refInfo.Source, selected, refInfo.Name, false, targetOverride)
+				if err != nil {
+					return err
+				}
+				printSkillWarnings(cmd, warnings)
+
+				if len(added) == 1 {
+					fmt.Fprintf(cmd.OutOrStdout(), "added %s to %s\n", added[0], manifestDisplayName(svc))
+					return nil
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "added %d skills to %s: %s\n", len(added), manifestDisplayName(svc), strings.Join(added, ", "))
+				return nil
 			}
 
 			if len(src.Skills) > 0 && len(skills) > 0 {
@@ -36,10 +69,6 @@ func newAddCmd(opts Options) *cobra.Command {
 			}
 			if (len(src.Skills) > 0 || len(skills) > 0) && addAll {
 				return fmt.Errorf("--all cannot be used with explicit skill selectors")
-			}
-			targetOverride, err := normalizeInitTargets(targets, svc, false)
-			if err != nil {
-				return err
 			}
 
 			selected := append([]string(nil), skills...)

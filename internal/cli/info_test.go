@@ -54,6 +54,40 @@ func TestInfoShowsDetailedSkillState(t *testing.T) {
 	assertContains(t, out, "target claude: linked")
 }
 
+func TestInfoAcceptsSkillReference(t *testing.T) {
+	t.Parallel()
+
+	repoPath, _ := createGitRepo(t, "repo-map", "repo-map")
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	installManifestForTest(t, projectDir, homeDir, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills: []manifest.Skill{
+			{
+				Name:          "repo-map",
+				Source:        "git:" + repoPath + "@v1.0.0",
+				UpstreamSkill: "repo-map",
+			},
+		},
+	})
+
+	var stdout bytes.Buffer
+	infoCmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &stdout,
+		Stderr:     &bytes.Buffer{},
+	})
+	infoCmd.SetArgs([]string{"info", "@1"})
+	if err := infoCmd.Execute(); err != nil {
+		t.Fatalf("info Execute() error = %v", err)
+	}
+
+	assertContains(t, stdout.String(), "name: repo-map")
+}
+
 func TestInfoReportsDriftedTarget(t *testing.T) {
 	t.Parallel()
 
