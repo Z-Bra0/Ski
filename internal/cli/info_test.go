@@ -17,7 +17,7 @@ func TestInfoShowsDetailedSkillState(t *testing.T) {
 	projectDir := t.TempDir()
 	homeDir := t.TempDir()
 
-	if err := manifest.WriteFile(filepath.Join(projectDir, manifest.FileName), manifest.Manifest{
+	installManifestForTest(t, projectDir, homeDir, manifest.Manifest{
 		Version: 1,
 		Targets: []string{"claude"},
 		Skills: []manifest.Skill{
@@ -28,20 +28,7 @@ func TestInfoShowsDetailedSkillState(t *testing.T) {
 				Version:       "1.2.3",
 			},
 		},
-	}); err != nil {
-		t.Fatalf("WriteFile(manifest) error = %v", err)
-	}
-
-	installCmd := NewRootCmd(Options{
-		Getwd:      func() (string, error) { return projectDir, nil },
-		GetHomeDir: func() (string, error) { return homeDir, nil },
-		Stdout:     &bytes.Buffer{},
-		Stderr:     &bytes.Buffer{},
 	})
-	installCmd.SetArgs([]string{"install"})
-	if err := installCmd.Execute(); err != nil {
-		t.Fatalf("install Execute() error = %v", err)
-	}
 
 	var stdout bytes.Buffer
 	infoCmd := NewRootCmd(Options{
@@ -74,7 +61,7 @@ func TestInfoReportsDriftedTarget(t *testing.T) {
 	projectDir := t.TempDir()
 	homeDir := t.TempDir()
 
-	if err := manifest.WriteFile(filepath.Join(projectDir, manifest.FileName), manifest.Manifest{
+	installManifestForTest(t, projectDir, homeDir, manifest.Manifest{
 		Version: 1,
 		Targets: []string{"claude"},
 		Skills: []manifest.Skill{
@@ -84,20 +71,7 @@ func TestInfoReportsDriftedTarget(t *testing.T) {
 				UpstreamSkill: "repo-map",
 			},
 		},
-	}); err != nil {
-		t.Fatalf("WriteFile(manifest) error = %v", err)
-	}
-
-	installCmd := NewRootCmd(Options{
-		Getwd:      func() (string, error) { return projectDir, nil },
-		GetHomeDir: func() (string, error) { return homeDir, nil },
-		Stdout:     &bytes.Buffer{},
-		Stderr:     &bytes.Buffer{},
 	})
-	installCmd.SetArgs([]string{"install"})
-	if err := installCmd.Execute(); err != nil {
-		t.Fatalf("install Execute() error = %v", err)
-	}
 
 	linkPath := filepath.Join(projectDir, ".claude", "skills", "repo-map")
 	if err := os.Remove(linkPath); err != nil {
@@ -160,7 +134,7 @@ func TestInfoReportsMissingStoreSnapshot(t *testing.T) {
 	projectDir := t.TempDir()
 	homeDir := t.TempDir()
 
-	if err := manifest.WriteFile(filepath.Join(projectDir, manifest.FileName), manifest.Manifest{
+	installManifestForTest(t, projectDir, homeDir, manifest.Manifest{
 		Version: 1,
 		Targets: []string{"claude"},
 		Skills: []manifest.Skill{
@@ -170,20 +144,7 @@ func TestInfoReportsMissingStoreSnapshot(t *testing.T) {
 				UpstreamSkill: "repo-map",
 			},
 		},
-	}); err != nil {
-		t.Fatalf("WriteFile(manifest) error = %v", err)
-	}
-
-	installCmd := NewRootCmd(Options{
-		Getwd:      func() (string, error) { return projectDir, nil },
-		GetHomeDir: func() (string, error) { return homeDir, nil },
-		Stdout:     &bytes.Buffer{},
-		Stderr:     &bytes.Buffer{},
 	})
-	installCmd.SetArgs([]string{"install"})
-	if err := installCmd.Execute(); err != nil {
-		t.Fatalf("install Execute() error = %v", err)
-	}
 
 	storeRoot := filepath.Join(homeDir, ".ski", "store", "git", "repo-map", commit)
 	if err := os.RemoveAll(storeRoot); err != nil {
@@ -214,7 +175,7 @@ func TestInfoReportsMalformedStoredSelectedSkill(t *testing.T) {
 	projectDir := t.TempDir()
 	homeDir := t.TempDir()
 
-	if err := manifest.WriteFile(filepath.Join(projectDir, manifest.FileName), manifest.Manifest{
+	installManifestForTest(t, projectDir, homeDir, manifest.Manifest{
 		Version: 1,
 		Targets: []string{"claude"},
 		Skills: []manifest.Skill{
@@ -224,29 +185,12 @@ func TestInfoReportsMalformedStoredSelectedSkill(t *testing.T) {
 				UpstreamSkill: "repo-map",
 			},
 		},
-	}); err != nil {
-		t.Fatalf("WriteFile(manifest) error = %v", err)
-	}
-
-	installCmd := NewRootCmd(Options{
-		Getwd:      func() (string, error) { return projectDir, nil },
-		GetHomeDir: func() (string, error) { return homeDir, nil },
-		Stdout:     &bytes.Buffer{},
-		Stderr:     &bytes.Buffer{},
 	})
-	installCmd.SetArgs([]string{"install"})
-	if err := installCmd.Execute(); err != nil {
-		t.Fatalf("install Execute() error = %v", err)
-	}
-
-	storeRoot := filepath.Join(homeDir, ".ski", "store", "git", "repo-map", commit)
-	if err := os.WriteFile(filepath.Join(storeRoot, "SKILL.md"), []byte(`---
+	overwriteStoredSkillFile(t, homeDir, "repo-map", commit, "SKILL.md", `---
 name: repo-map
 description: [unterminated
 ---
-`), 0o644); err != nil {
-		t.Fatalf("WriteFile(SKILL.md) error = %v", err)
-	}
+`)
 
 	var stdout bytes.Buffer
 	infoCmd := NewRootCmd(Options{

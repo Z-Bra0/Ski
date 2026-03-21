@@ -121,15 +121,8 @@ func DiscoverGit(projectRoot, homeDir string, spec source.Git) (RepoResult, erro
 		return RepoResult{}, fmt.Errorf("no skills found in repository")
 	}
 
-	if err := os.MkdirAll(filepath.Dir(storePath), 0o755); err != nil {
-		return RepoResult{}, fmt.Errorf("mkdir %s: %w", filepath.Dir(storePath), err)
-	}
-	// The store keeps plain snapshots, not working clones with git metadata.
-	if err := os.RemoveAll(filepath.Join(checkoutDir, ".git")); err != nil {
-		return RepoResult{}, fmt.Errorf("remove git metadata: %w", err)
-	}
-	if err := moveDirIntoStore(checkoutDir, storePath); err != nil {
-		return RepoResult{}, fmt.Errorf("move checkout into store: %w", err)
+	if err := persistGitSnapshot(checkoutDir, storePath); err != nil {
+		return RepoResult{}, err
 	}
 
 	return buildRepoResult(
@@ -141,16 +134,24 @@ func DiscoverGit(projectRoot, homeDir string, spec source.Git) (RepoResult, erro
 }
 
 func storeInvalidGitSnapshot(checkoutDir, storePath string, invalidSkills []InvalidSkill) ([]InvalidSkill, error) {
-	if err := os.MkdirAll(filepath.Dir(storePath), 0o755); err != nil {
-		return nil, fmt.Errorf("mkdir %s: %w", filepath.Dir(storePath), err)
-	}
-	if err := os.RemoveAll(filepath.Join(checkoutDir, ".git")); err != nil {
-		return nil, fmt.Errorf("remove git metadata: %w", err)
-	}
-	if err := moveDirIntoStore(checkoutDir, storePath); err != nil {
-		return nil, fmt.Errorf("move checkout into store: %w", err)
+	if err := persistGitSnapshot(checkoutDir, storePath); err != nil {
+		return nil, err
 	}
 	return rewriteInvalidSkillPaths(invalidSkills, checkoutDir, storePath), nil
+}
+
+func persistGitSnapshot(checkoutDir, storePath string) error {
+	if err := os.MkdirAll(filepath.Dir(storePath), 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", filepath.Dir(storePath), err)
+	}
+	// The store keeps plain snapshots, not working clones with git metadata.
+	if err := os.RemoveAll(filepath.Join(checkoutDir, ".git")); err != nil {
+		return fmt.Errorf("remove git metadata: %w", err)
+	}
+	if err := moveDirIntoStore(checkoutDir, storePath); err != nil {
+		return fmt.Errorf("move checkout into store: %w", err)
+	}
+	return nil
 }
 
 // EnsureGit ensures a selected skill is present in the store and returns its path.
