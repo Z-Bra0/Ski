@@ -88,7 +88,7 @@ ski install
 
 ```bash
 make build                     # local dev build; `ski version` prints `dev`
-make release VERSION=0.1.1
+make release VERSION=0.2.1
 ```
 
 ---

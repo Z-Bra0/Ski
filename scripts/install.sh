@@ -9,7 +9,7 @@ VERSION=""
 
 usage() {
 	cat <<'EOF'
-Usage: install.sh [--version v0.1.1] [--dir /path/to/bin]
+Usage: install.sh [--version v0.2.1] [--dir /path/to/bin]
 
 Options:
   --version   Release tag to install. Defaults to the latest GitHub release.

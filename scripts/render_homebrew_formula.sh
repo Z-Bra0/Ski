@@ -17,7 +17,7 @@ OUTPUT=""
 
 usage() {
 	cat <<'EOF'
-Usage: render_homebrew_formula.sh --version v0.1.1 [--checksums dist/ski_0.1.1_checksums.txt] [--output /tmp/skicli.rb]
+Usage: render_homebrew_formula.sh --version v0.2.1 [--checksums dist/ski_0.2.1_checksums.txt] [--output /tmp/skicli.rb]
 
 Options:
   --version    Release version to render, with or without a leading v.

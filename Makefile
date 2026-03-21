@@ -32,7 +32,7 @@ clean:
 
 assert-release-version:
 	@if [ "$(VERSION)" = "dev" ]; then \
-		echo "VERSION is required for release, for example: make release VERSION=0.1.1"; \
+		echo "VERSION is required for release, for example: make release VERSION=0.2.1"; \
 		exit 1; \
 	fi
 
