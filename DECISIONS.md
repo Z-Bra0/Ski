@@ -24,6 +24,7 @@ Current design decisions and their rationale.
 - Manifest skill names default from discovered `SKILL.md` metadata — local names stay aligned with the upstream skill contract; `--name` remains available as a local alias for a single selected skill.
 - Multi-skill repositories are selected by discovered skill name — `ski add` scans for `SKILL.md` files up to depth 3, supports explicit `--skill` selection, `--all`, and interactive selection on TTYs.
 - Legacy `##skill` selectors are read-only migration input — the CLI may still accept them on input, but canonical manifests and lockfiles write `source` plus `upstream_skill` instead.
+- Skill validation is compatibility-first — `ski` hard-fails only on metadata that would break its own install model, while strict Agent Skills spec mismatches remain non-fatal; `ski add` currently surfaces them as warnings so broader ecosystem repos still work.
 
 ## Integrity And Targets
 

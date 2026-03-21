@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -232,6 +233,84 @@ func TestAddSupportsNameOverride(t *testing.T) {
 	wantStore := filepath.Join(homeDir, ".ski", "store", "git", "repo-map", commit)
 	if targetPath != wantStore {
 		t.Fatalf("symlink target = %q, want %q", targetPath, wantStore)
+	}
+}
+
+func TestAddWarnsOnStrictSkillSpecMismatchesButSucceeds(t *testing.T) {
+	t.Parallel()
+
+	repo := testutil.NewMultiSkillRepo(t, "gstack", []testutil.SkillSpec{
+		{Path: ".", Name: "gstack"},
+		{Path: filepath.Join("skills", "office-hours"), Name: "office-hours"},
+	})
+	repoPathByURL.Store(repo.URL, repo.Path)
+
+	rootSkillPath := filepath.Join(repo.Path, "SKILL.md")
+	rootSkillDoc := fmt.Sprintf(`---
+name: gstack
+version: 1.0.0
+description: %s
+allowed-tools:
+  - Bash
+  - Read
+---
+
+# gstack
+`, strings.Repeat("x", 1025))
+	if err := os.WriteFile(rootSkillPath, []byte(rootSkillDoc), 0o644); err != nil {
+		t.Fatalf("WriteFile(root SKILL.md) error = %v", err)
+	}
+	testutil.RunGit(t, repo.Path, "add", ".")
+	testutil.RunGit(t, repo.Path, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "relax root skill spec")
+
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	path := filepath.Join(projectDir, manifest.FileName)
+	if err := manifest.WriteFile(path, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills:  []manifest.Skill{},
+	}); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &stdout,
+		Stderr:     &stderr,
+	})
+	cmd.SetArgs([]string{"add", repo.URL, "--skill", "office-hours"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	if got := stdout.String(); !strings.Contains(got, "added office-hours") {
+		t.Fatalf("stdout = %q, want add confirmation", got)
+	}
+	lf, err := lockfile.ReadFile(filepath.Join(projectDir, lockfile.FileName))
+	if err != nil {
+		t.Fatalf("ReadFile(lockfile) error = %v", err)
+	}
+	if len(lf.Skills) != 1 {
+		t.Fatalf("lockfile skills = %#v, want one entry", lf.Skills)
+	}
+	storeSkillPath := filepath.Join(homeDir, ".ski", "store", "git", "gstack", lf.Skills[0].Commit, "SKILL.md")
+	if strings.Contains(stderr.String(), "/checkout/SKILL.md") {
+		t.Fatalf("stderr = %q, want warning paths rewritten away from temp checkout", stderr.String())
+	}
+	for _, want := range []string{
+		`warning: skill "gstack" (` + storeSkillPath + `): unknown frontmatter field "version" is outside the Agent Skills spec`,
+		`warning: skill "gstack" (` + storeSkillPath + `): description exceeds the Agent Skills spec limit of 1024 characters`,
+		`warning: skill "gstack" (` + storeSkillPath + `): allowed-tools should use the Agent Skills space-delimited string form`,
+	} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr = %q, want substring %q", stderr.String(), want)
+		}
 	}
 }
 

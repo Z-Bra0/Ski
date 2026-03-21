@@ -30,9 +30,10 @@ type Result struct {
 
 // RepoResult describes a discovered repository snapshot and its skills.
 type RepoResult struct {
-	Commit string
-	Root   string
-	Skills []DiscoveredSkill
+	Commit   string
+	Root     string
+	Skills   []DiscoveredSkill
+	Warnings []skill.ValidationWarning
 }
 
 // DiscoveredSkill identifies one skill directory inside a repository snapshot.
@@ -92,7 +93,7 @@ func DiscoverGit(projectRoot, homeDir string, spec source.Git) (RepoResult, erro
 		return RepoResult{}, err
 	}
 
-	skills, err := discoverSkills(checkoutDir)
+	skills, warnings, err := discoverSkills(checkoutDir)
 	if err != nil {
 		return RepoResult{}, err
 	}
@@ -111,7 +112,7 @@ func DiscoverGit(projectRoot, homeDir string, spec source.Git) (RepoResult, erro
 		return RepoResult{}, fmt.Errorf("move checkout into store: %w", err)
 	}
 
-	return buildRepoResult(storePath, commit, skills), nil
+	return buildRepoResult(storePath, commit, skills, rewriteWarningPaths(warnings, checkoutDir, storePath)), nil
 }
 
 // EnsureGit ensures a selected skill is present in the store and returns its path.
@@ -184,17 +185,17 @@ func loadStoredRepo(storePath, commit string) (RepoResult, error) {
 		return RepoResult{}, fmt.Errorf("store path %s is not a directory", storePath)
 	}
 
-	skills, err := discoverSkills(storePath)
+	skills, warnings, err := discoverSkills(storePath)
 	if err != nil {
 		return RepoResult{}, err
 	}
 	if len(skills) == 0 {
 		return RepoResult{}, fmt.Errorf("no skills found in store snapshot %s", storePath)
 	}
-	return buildRepoResult(storePath, commit, skills), nil
+	return buildRepoResult(storePath, commit, skills, warnings), nil
 }
 
-func buildRepoResult(root, commit string, skills []DiscoveredSkill) RepoResult {
+func buildRepoResult(root, commit string, skills []DiscoveredSkill, warnings []skill.ValidationWarning) RepoResult {
 	out := make([]DiscoveredSkill, 0, len(skills))
 	for _, discovered := range skills {
 		rel := discovered.RelativePath
@@ -207,18 +208,41 @@ func buildRepoResult(root, commit string, skills []DiscoveredSkill) RepoResult {
 			Path:         filepath.Join(root, rel),
 		})
 	}
-	return RepoResult{Commit: commit, Root: root, Skills: out}
+	return RepoResult{
+		Commit:   commit,
+		Root:     root,
+		Skills:   out,
+		Warnings: append([]skill.ValidationWarning(nil), warnings...),
+	}
 }
 
-func discoverSkills(root string) ([]DiscoveredSkill, error) {
+func rewriteWarningPaths(warnings []skill.ValidationWarning, fromRoot, toRoot string) []skill.ValidationWarning {
+	if len(warnings) == 0 || fromRoot == toRoot {
+		return append([]skill.ValidationWarning(nil), warnings...)
+	}
+
+	out := make([]skill.ValidationWarning, 0, len(warnings))
+	for _, warning := range warnings {
+		rewritten := warning
+		if rel, err := filepath.Rel(fromRoot, warning.Path); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			rewritten.Path = filepath.Join(toRoot, rel)
+		}
+		out = append(out, rewritten)
+	}
+	return out
+}
+
+func discoverSkills(root string) ([]DiscoveredSkill, []skill.ValidationWarning, error) {
 	skills := make([]DiscoveredSkill, 0)
+	warnings := make([]skill.ValidationWarning, 0)
 	seen := make(map[string]string)
 
 	var walk func(dir string, depth int) error
 	walk = func(dir string, depth int) error {
-		if meta, found, err := loadSkillMetadata(dir); err != nil {
+		if meta, skillWarnings, found, err := loadSkillMetadata(dir); err != nil {
 			return err
 		} else if found {
+			warnings = append(warnings, skillWarnings...)
 			rel, err := filepath.Rel(root, dir)
 			if err != nil {
 				return fmt.Errorf("derive relative path for %s: %w", dir, err)
@@ -257,29 +281,35 @@ func discoverSkills(root string) ([]DiscoveredSkill, error) {
 	}
 
 	if err := walk(root, 0); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	slices.SortFunc(skills, func(a, b DiscoveredSkill) int {
 		return strings.Compare(a.Name, b.Name)
 	})
-	return skills, nil
+	slices.SortFunc(warnings, func(a, b skill.ValidationWarning) int {
+		if cmp := strings.Compare(a.Path, b.Path); cmp != 0 {
+			return cmp
+		}
+		return strings.Compare(a.Message, b.Message)
+	})
+	return skills, warnings, nil
 }
 
-func loadSkillMetadata(dir string) (*skill.Metadata, bool, error) {
+func loadSkillMetadata(dir string) (*skill.Metadata, []skill.ValidationWarning, bool, error) {
 	path := filepath.Join(dir, skill.FileName)
 	if _, err := os.Stat(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, false, nil
+			return nil, nil, false, nil
 		}
-		return nil, false, fmt.Errorf("stat %s: %w", path, err)
+		return nil, nil, false, fmt.Errorf("stat %s: %w", path, err)
 	}
 
-	meta, err := skill.ValidateDir(dir, "")
+	meta, warnings, err := skill.ValidateDirWithWarnings(dir, "")
 	if err != nil {
-		return nil, false, err
+		return nil, nil, false, err
 	}
-	return meta, true, nil
+	return meta, warnings, true, nil
 }
 
 func resolveDiscoveredSkill(skills []DiscoveredSkill, spec source.Git, expectedName string) (DiscoveredSkill, error) {

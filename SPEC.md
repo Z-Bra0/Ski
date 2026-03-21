@@ -4,7 +4,7 @@
 
 ## Skill Format
 
-A skill is a directory containing a valid `SKILL.md` that follows the Agent Skills format.
+A skill is a directory containing a valid `SKILL.md`.
 
 ```
 my-skill/
@@ -12,7 +12,12 @@ my-skill/
   tools/             # optional
 ```
 
-For the MVP, `ski add` validates these requirements before it writes `ski.lock.json` or links the skill:
+`ski` uses two validation layers before it writes `ski.lock.json` or links the skill:
+
+- compatibility validation hard-fails the operation
+- strict Agent Skills spec validation is non-fatal; `ski add` currently surfaces those mismatches as warnings
+
+Compatibility validation requires:
 
 - each discovered skill directory must contain a `SKILL.md`
 - single-skill repos may place `SKILL.md` at the repository root
@@ -21,6 +26,12 @@ For the MVP, `ski add` validates these requirements before it writes `ski.lock.j
 - frontmatter must include `name` and `description`
 - `name` must use lowercase letters, numbers, and single hyphens only
 - `name` must match the installed skill directory name
+
+Strict Agent Skills validation currently checks for:
+
+- unknown top-level frontmatter fields
+- `allowed-tools` using YAML list form instead of the Agent Skills string form
+- `name`, `description`, or `compatibility` values that exceed the published spec limits
 
 Reference spec: <https://agentskills.io/specification>
 

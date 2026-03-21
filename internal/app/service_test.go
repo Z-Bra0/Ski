@@ -48,7 +48,7 @@ func TestAddSelectedRollsBackAfterLinkFailure(t *testing.T) {
 			return target.UnlinkAll(projectDir, targets, name)
 		},
 	}
-	_, err := svc.AddSelected("git:"+repo.URL, []string{"alpha-skill", "beta-skill"}, "")
+	_, _, err := svc.AddSelected("git:"+repo.URL, []string{"alpha-skill", "beta-skill"}, "")
 	if err == nil {
 		t.Fatal("AddSelected() error = nil, want forced link failure")
 	}

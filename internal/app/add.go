@@ -8,6 +8,7 @@ import (
 
 	"github.com/Z-Bra0/Ski/internal/lockfile"
 	"github.com/Z-Bra0/Ski/internal/manifest"
+	"github.com/Z-Bra0/Ski/internal/skill"
 	"github.com/Z-Bra0/Ski/internal/store"
 )
 
@@ -24,32 +25,32 @@ type plannedAdd struct {
 // Add parses a git source, fetches it into the store, links to targets,
 // and writes both the manifest and lockfile.
 // Returns the skill names that were added.
-func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOverride string) ([]string, error) {
+func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOverride string) ([]string, []skill.ValidationWarning, error) {
 	path := s.manifestPath()
 	originalManifestData, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, fmt.Errorf("%s not found; %s", path, s.initHint())
+			return nil, nil, fmt.Errorf("%s not found; %s", path, s.initHint())
 		}
-		return nil, fmt.Errorf("read %s: %w", path, err)
+		return nil, nil, fmt.Errorf("read %s: %w", path, err)
 	}
 	doc, err := manifest.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
+		return nil, nil, fmt.Errorf("read %s: %w", path, err)
 	}
 
 	src, err := s.prepareAddSource(rawSource)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	if len(src.Skills) > 0 && len(selectedSkills) > 0 && !sameStrings(src.Skills, selectedSkills) {
-		return nil, fmt.Errorf("selected skills %v do not match source selectors %v", selectedSkills, src.Skills)
+		return nil, nil, fmt.Errorf("selected skills %v do not match source selectors %v", selectedSkills, src.Skills)
 	}
 
 	discovered, err := store.DiscoverGit(s.sourceResolveDir(), s.HomeDir, src)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	requestedSkills := append([]string(nil), selectedSkills...)
@@ -58,21 +59,21 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 	}
 	requestedSkills, err = resolveRequestedSkills(discovered.Skills, requestedSkills)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	if nameOverride != "" && len(requestedSkills) != 1 {
-		return nil, fmt.Errorf("name override can only be used when adding one skill")
+		return nil, nil, fmt.Errorf("name override can only be used when adding one skill")
 	}
 
 	lockPath := s.lockPath()
 	originalLockData, hadLockfile, err := readOptionalFile(lockPath)
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", lockPath, err)
+		return nil, nil, fmt.Errorf("read %s: %w", lockPath, err)
 	}
 	lf, err := readOrDefaultLockfile(lockPath)
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", lockPath, err)
+		return nil, nil, fmt.Errorf("read %s: %w", lockPath, err)
 	}
 
 	baseSource := src.WithoutSkills()
@@ -89,21 +90,21 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 		canonical := baseSource.String()
 
 		if existing, ok := findSkill(nextDoc.Skills, func(skill manifest.Skill) bool { return skill.Name == localName }); ok {
-			return nil, fmt.Errorf("skill name %q already exists for source %q", localName, existing.Source)
+			return nil, nil, fmt.Errorf("skill name %q already exists for source %q", localName, existing.Source)
 		}
 		if existing, ok, err := findSkillByIdentity(nextDoc.Skills, canonical, selectedSkillName); err != nil {
-			return nil, err
+			return nil, nil, err
 		} else if ok {
-			return nil, fmt.Errorf("source %q with upstream skill %q already exists as skill %q", canonical, selectedSkillName, existing.Name)
+			return nil, nil, fmt.Errorf("source %q with upstream skill %q already exists as skill %q", canonical, selectedSkillName, existing.Name)
 		}
 
 		stored, err := store.EnsureGit(s.sourceResolveDir(), s.HomeDir, baseSource.WithSkills([]string{selectedSkillName}), selectedSkillName)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		if err := s.preflightAddLinks(effectiveTargets, localName, stored.Path); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		manifestEntry := manifest.Skill{
@@ -136,20 +137,20 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 	}
 
 	if err := ensureParentDir(lockPath); err != nil {
-		return nil, fmt.Errorf("mkdir %s: %w", filepath.Dir(lockPath), err)
+		return nil, nil, fmt.Errorf("mkdir %s: %w", filepath.Dir(lockPath), err)
 	}
 	if err := lockfile.WriteFile(lockPath, nextLock); err != nil {
-		return nil, fmt.Errorf("write %s: %w", lockPath, err)
+		return nil, nil, fmt.Errorf("write %s: %w", lockPath, err)
 	}
 
 	if err := ensureParentDir(path); err != nil {
-		return nil, fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
+		return nil, nil, fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
 	}
 	if err := manifest.WriteFile(path, nextDoc); err != nil {
 		if restoreErr := restoreProjectFiles(path, originalManifestData, lockPath, originalLockData, hadLockfile); restoreErr != nil {
-			return nil, fmt.Errorf("write %s: %w (rollback failed: %v)", path, err, restoreErr)
+			return nil, nil, fmt.Errorf("write %s: %w (rollback failed: %v)", path, err, restoreErr)
 		}
-		return nil, fmt.Errorf("write %s: %w", path, err)
+		return nil, nil, fmt.Errorf("write %s: %w", path, err)
 	}
 
 	linked := make([]plannedAdd, 0, len(planned))
@@ -157,14 +158,14 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 		if err := s.linkAll(plan.Targets, plan.Name, plan.StorePath); err != nil {
 			rollbackErr := s.rollbackAddSelected(linked, path, originalManifestData, lockPath, originalLockData, hadLockfile)
 			if rollbackErr != nil {
-				return nil, fmt.Errorf("%w (rollback failed: %v)", err, rollbackErr)
+				return nil, nil, fmt.Errorf("%w (rollback failed: %v)", err, rollbackErr)
 			}
-			return nil, err
+			return nil, nil, err
 		}
 		linked = append(linked, plan)
 	}
 
-	return added, nil
+	return added, append([]skill.ValidationWarning(nil), discovered.Warnings...), nil
 }
 
 func findSkillByIdentity(skills []manifest.Skill, sourceValue, upstreamSkill string) (manifest.Skill, bool, error) {

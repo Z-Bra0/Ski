@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Z-Bra0/Ski/internal/app"
+	"github.com/Z-Bra0/Ski/internal/skill"
 	"github.com/Z-Bra0/Ski/internal/source"
 )
 
@@ -41,7 +42,7 @@ func newAddCmd(opts Options) *cobra.Command {
 			if len(selected) == 0 {
 				selected = append(selected, src.Skills...)
 			}
-			added, err := svc.AddSelected(args[0], selected, name)
+			added, warnings, err := svc.AddSelected(args[0], selected, name)
 			if err != nil {
 				var multiErr app.MultiSkillSelectionError
 				if !errors.As(err, &multiErr) {
@@ -52,11 +53,12 @@ func newAddCmd(opts Options) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				added, err = svc.AddSelected(args[0], selected, name)
+				added, warnings, err = svc.AddSelected(args[0], selected, name)
 				if err != nil {
 					return err
 				}
 			}
+			printSkillWarnings(cmd, warnings)
 
 			if len(added) == 1 {
 				fmt.Fprintf(cmd.OutOrStdout(), "added %s to %s\n", added[0], manifestDisplayName(svc))
@@ -108,4 +110,10 @@ func promptForSkills(cmd *cobra.Command, opts Options, discovered []string) ([]s
 		Options:     discovered,
 		MinSelected: 1,
 	})
+}
+
+func printSkillWarnings(cmd *cobra.Command, warnings []skill.ValidationWarning) {
+	for _, warning := range warnings {
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: skill %q (%s): %s\n", warning.Name, warning.Path, warning.Message)
+	}
 }
