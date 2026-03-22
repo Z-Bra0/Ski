@@ -22,6 +22,58 @@ func customLink(projectRoot, rel, name string) string {
 	return filepath.Join(projectRoot, rel, name)
 }
 
+func TestBuiltInTargetDirs(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	homeDir := t.TempDir()
+	rootReal, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(root) error = %v", err)
+	}
+	homeReal, err := filepath.EvalSymlinks(homeDir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(homeDir) error = %v", err)
+	}
+
+	tests := []struct {
+		name       string
+		projectDir string
+		globalDir  string
+	}{
+		{name: "claude", projectDir: filepath.Join(rootReal, ".claude", "skills"), globalDir: filepath.Join(homeReal, ".claude", "skills")},
+		{name: "codex", projectDir: filepath.Join(rootReal, ".codex", "skills"), globalDir: filepath.Join(homeReal, ".codex", "skills")},
+		{name: "cursor", projectDir: filepath.Join(rootReal, ".cursor", "skills"), globalDir: filepath.Join(homeReal, ".cursor", "skills")},
+		{name: "openclaw", projectDir: filepath.Join(rootReal, ".openclaw", "skills"), globalDir: filepath.Join(homeReal, ".openclaw", "skills")},
+		{name: "opencode", projectDir: filepath.Join(rootReal, ".opencode", "skills"), globalDir: filepath.Join(homeReal, ".config", "opencode", "skills")},
+		{name: "goose", projectDir: filepath.Join(rootReal, ".goose", "skills"), globalDir: filepath.Join(homeReal, ".config", "goose", "skills")},
+		{name: "agents", projectDir: filepath.Join(rootReal, ".agents", "skills"), globalDir: filepath.Join(homeReal, ".config", "agents", "skills")},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			gotProject, err := target.SkillDir(root, tc.name)
+			if err != nil {
+				t.Fatalf("SkillDir(%q) error = %v", tc.name, err)
+			}
+			if gotProject != tc.projectDir {
+				t.Fatalf("SkillDir(%q) = %q, want %q", tc.name, gotProject, tc.projectDir)
+			}
+
+			gotGlobal, err := target.GlobalSkillDir(homeDir, tc.name)
+			if err != nil {
+				t.Fatalf("GlobalSkillDir(%q) error = %v", tc.name, err)
+			}
+			if gotGlobal != tc.globalDir {
+				t.Fatalf("GlobalSkillDir(%q) = %q, want %q", tc.name, gotGlobal, tc.globalDir)
+			}
+		})
+	}
+}
+
 // TestLinkCreatesSymlink verifies that Link creates the target directory and
 // a symlink pointing at storePath.
 func TestLinkCreatesSymlink(t *testing.T) {

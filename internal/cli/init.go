@@ -10,7 +10,7 @@ import (
 	"github.com/Z-Bra0/Ski/internal/target"
 )
 
-var initBuiltInTargets = []string{"claude", "codex", "cursor", "openclaw"}
+var initBuiltInTargets = target.BuiltInNames()
 
 func newInitCmd(opts Options) *cobra.Command {
 	var targets []string

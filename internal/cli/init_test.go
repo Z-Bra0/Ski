@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Z-Bra0/Ski/internal/manifest"
+	"github.com/Z-Bra0/Ski/internal/target"
 )
 
 func TestInitCreatesManifest(t *testing.T) {
@@ -157,7 +158,7 @@ func TestInitPromptsForTargetsOnTTY(t *testing.T) {
 			if !strings.Contains(req.Description, "space to toggle multiple items") {
 				t.Fatalf("prompt description = %q, want multi-select hint", req.Description)
 			}
-			wantOptions := []string{"all", "claude", "codex", "cursor", "openclaw"}
+			wantOptions := append([]string{"all"}, target.BuiltInNames()...)
 			if !reflect.DeepEqual(req.Options, wantOptions) {
 				t.Fatalf("prompt options = %#v, want %#v", req.Options, wantOptions)
 			}
@@ -210,7 +211,7 @@ func TestInitPromptAllExpandsBuiltInTargets(t *testing.T) {
 	}
 	want := manifest.Manifest{
 		Version: 1,
-		Targets: []string{"claude", "codex", "cursor", "openclaw"},
+		Targets: target.BuiltInNames(),
 		Skills:  []manifest.Skill{},
 	}
 	if !reflect.DeepEqual(*doc, want) {

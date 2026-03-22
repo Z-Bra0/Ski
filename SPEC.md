@@ -194,9 +194,10 @@ Creates the active-scope manifest if it does not already exist:
 
 If `--target` flags are provided, `ski init` writes them into the new manifest.
 
-If no `--target` flags are provided and `ski init` is running on a TTY, it prompts for:
+If no `--target` flags are provided and `ski init` is running on a TTY, it prompts for built-in targets such as:
 
-- built-in targets such as `claude` and `codex`
+- `claude`, `codex`, `cursor`, `openclaw`
+- `opencode`, `goose`, and `agents`
 
 Custom target directories are not prompted for during `ski init`. Add them later by editing the manifest manually, or pass them explicitly with `--target dir:<path>`.
 
@@ -319,6 +320,9 @@ Global scope uses the same `targets` field but resolves it against the global sc
 | `codex` | `./.codex/skills/` |
 | `cursor` | `./.cursor/skills/` |
 | `openclaw` | `./.openclaw/skills/` |
+| `opencode` | `./.opencode/skills/` |
+| `goose` | `./.goose/skills/` |
+| `agents` | `./.agents/skills/` |
 
 | Adapter | Global skill directory |
 |---------|------------------------|
@@ -326,6 +330,9 @@ Global scope uses the same `targets` field but resolves it against the global sc
 | `codex` | `~/.codex/skills/` |
 | `cursor` | `~/.cursor/skills/` |
 | `openclaw` | `~/.openclaw/skills/` |
+| `opencode` | `~/.config/opencode/skills/` |
+| `goose` | `~/.config/goose/skills/` |
+| `agents` | `~/.config/agents/skills/` |
 
 ---
 

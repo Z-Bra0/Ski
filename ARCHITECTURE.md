@@ -14,7 +14,7 @@ Application Core
 ├── Source Adapters      (fetch skills from git in the MVP)
 ├── Skill Store          (~/.ski/store — central on-disk cache)
 ├── Manifest/Lockfile    (read/write local and global state)
-├── Target Adapters      (link skills into .claude/skills, .codex/skills, etc.)
+├── Target Adapters      (link skills into .claude/skills, .codex/skills, .opencode/skills, etc.)
 └── Doctor / Maintenance (symlink checks, consistency validation)
 ```
 
@@ -43,7 +43,7 @@ ski/
     lockfile/           # ski.lock.json read/write
     store/              # central store: fetch, cache, gc
     source/             # source adapters (git/ in the MVP)
-    target/             # target adapters (claude/, codex/, cursor/, openclaw/)
+    target/             # target adapters and built-in target registry
 ```
 
 ---

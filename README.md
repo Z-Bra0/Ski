@@ -128,6 +128,7 @@ ski version
 - `ski version` reports the CLI build version. Dev builds print `dev`; release builds use the version passed to `make release VERSION=...`.
 - `make release VERSION=...` also writes `dist/ski_<version>_checksums.txt` for installer verification.
 - Local targets write into the project. `-g` uses `~/.ski/global.toml` and global agent directories instead.
+- Built-in targets include `claude`, `codex`, `cursor`, `openclaw`, `opencode`, `goose`, and `agents`.
 - Custom target folders use `dir:`. For example: `dir:./agent-skills/claude`.
 - `ski.toml` may define `[target_alias]` shortcuts such as `cc = "dir:./agent-skills/claude"`. Once defined, those alias names can be used in `targets = [...]` and `add/remove --target ...`.
 
