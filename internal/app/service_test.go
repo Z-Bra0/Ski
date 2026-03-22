@@ -264,6 +264,69 @@ func TestListRejectsInvalidGlobalManifestTargets(t *testing.T) {
 	}
 }
 
+func TestListRejectsManifestTargetsWithWhitespace(t *testing.T) {
+	t.Parallel()
+
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	manifestPath := filepath.Join(projectDir, manifest.FileName)
+	if err := manifest.WriteFile(manifestPath, manifest.Manifest{
+		Version: 1,
+		Targets: []string{" claude "},
+	}); err != nil {
+		t.Fatalf("WriteFile(manifest) error = %v", err)
+	}
+
+	svc := Service{
+		ProjectDir: projectDir,
+		HomeDir:    homeDir,
+	}
+
+	_, err := svc.List()
+	if err == nil {
+		t.Fatal("List() error = nil, want whitespace target error")
+	}
+	if !strings.Contains(err.Error(), `manifest targets: target " claude " must not include leading or trailing whitespace`) {
+		t.Fatalf("List() error = %v, want whitespace target error", err)
+	}
+}
+
+func TestListRejectsSkillLevelTargetsWithWhitespace(t *testing.T) {
+	t.Parallel()
+
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	manifestPath := filepath.Join(projectDir, manifest.FileName)
+	if err := manifest.WriteFile(manifestPath, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills: []manifest.Skill{
+			{
+				Name:    "repo-map",
+				Source:  "git:https://example.com/repo-map.git",
+				Targets: []string{" codex "},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("WriteFile(manifest) error = %v", err)
+	}
+
+	svc := Service{
+		ProjectDir: projectDir,
+		HomeDir:    homeDir,
+	}
+
+	_, err := svc.List()
+	if err == nil {
+		t.Fatal("List() error = nil, want whitespace skill target error")
+	}
+	if !strings.Contains(err.Error(), `skill "repo-map" targets: target " codex " must not include leading or trailing whitespace`) {
+		t.Fatalf("List() error = %v, want whitespace skill target error", err)
+	}
+}
+
 func TestInstallRollsBackAfterLinkFailure(t *testing.T) {
 	t.Parallel()
 

@@ -190,6 +190,9 @@ func (s Service) validateTargetSet(targets []string, context string) error {
 		if targetName == "" {
 			return fmt.Errorf("%s: target names must not be empty", context)
 		}
+		if targetName != rawTarget {
+			return fmt.Errorf("%s: target %q must not include leading or trailing whitespace", context, rawTarget)
+		}
 		if _, ok := seenNames[targetName]; ok {
 			return fmt.Errorf("%s: duplicate target %q", context, targetName)
 		}
