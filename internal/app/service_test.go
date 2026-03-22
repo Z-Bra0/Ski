@@ -179,6 +179,91 @@ func TestInitWithTargetsWritesSelectedTargets(t *testing.T) {
 	}
 }
 
+func TestListRejectsInvalidManifestTargets(t *testing.T) {
+	t.Parallel()
+
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	manifestPath := filepath.Join(projectDir, manifest.FileName)
+	if err := manifest.WriteFile(manifestPath, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"bad-target"},
+	}); err != nil {
+		t.Fatalf("WriteFile(manifest) error = %v", err)
+	}
+
+	svc := Service{
+		ProjectDir: projectDir,
+		HomeDir:    homeDir,
+	}
+
+	_, err := svc.List()
+	if err == nil {
+		t.Fatal("List() error = nil, want invalid manifest targets error")
+	}
+	if !strings.Contains(err.Error(), `manifest targets: unsupported target "bad-target"`) {
+		t.Fatalf("List() error = %v, want invalid target error", err)
+	}
+}
+
+func TestAddSelectedRejectsManifestTargetDirectoryConflicts(t *testing.T) {
+	t.Parallel()
+
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	manifestPath := filepath.Join(projectDir, manifest.FileName)
+	if err := manifest.WriteFile(manifestPath, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude", "dir:./.claude/skills"},
+	}); err != nil {
+		t.Fatalf("WriteFile(manifest) error = %v", err)
+	}
+
+	svc := Service{
+		ProjectDir: projectDir,
+		HomeDir:    homeDir,
+	}
+
+	_, _, err := svc.AddSelected("git:https://example.com/skills.git", nil, "", false, nil)
+	if err == nil {
+		t.Fatal("AddSelected() error = nil, want manifest target conflict error")
+	}
+	if !strings.Contains(err.Error(), `manifest targets: targets "claude" and "dir:./.claude/skills" resolve to the same directory`) {
+		t.Fatalf("AddSelected() error = %v, want target conflict error", err)
+	}
+}
+
+func TestListRejectsInvalidGlobalManifestTargets(t *testing.T) {
+	t.Parallel()
+
+	homeDir := t.TempDir()
+	globalManifestPath := manifest.GlobalPath(homeDir)
+	if err := os.MkdirAll(filepath.Dir(globalManifestPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll(global manifest dir) error = %v", err)
+	}
+	if err := manifest.WriteFile(globalManifestPath, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude", "dir:~/.claude/skills"},
+	}); err != nil {
+		t.Fatalf("WriteFile(global manifest) error = %v", err)
+	}
+
+	svc := Service{
+		HomeDir: homeDir,
+		Global:  true,
+	}
+
+	_, err := svc.List()
+	if err == nil {
+		t.Fatal("List() error = nil, want invalid global manifest targets error")
+	}
+	if !strings.Contains(err.Error(), `manifest targets: targets "claude" and "dir:~/.claude/skills" resolve to the same directory`) {
+		t.Fatalf("List() error = %v, want global target conflict error", err)
+	}
+}
+
 func TestInstallRollsBackAfterLinkFailure(t *testing.T) {
 	t.Parallel()
 

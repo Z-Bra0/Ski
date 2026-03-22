@@ -95,6 +95,17 @@ func ensureParentDir(path string) error {
 	return os.MkdirAll(filepath.Dir(path), 0o755)
 }
 
+func (s Service) readManifest(path string) (*manifest.Manifest, error) {
+	doc, err := manifest.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.validateManifestTargets(doc); err != nil {
+		return nil, err
+	}
+	return doc, nil
+}
+
 func (s Service) prepareAddSource(rawSource string) (source.Git, error) {
 	return source.ParseGit(rawSource)
 }
@@ -128,6 +139,9 @@ func (s Service) InitWithTargets(targets []string) (string, error) {
 
 	doc := manifest.Default()
 	doc.Targets = append([]string(nil), targets...)
+	if err := s.validateManifestTargets(&doc); err != nil {
+		return "", err
+	}
 	if err := ensureParentDir(path); err != nil {
 		return "", fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
 	}
@@ -139,7 +153,7 @@ func (s Service) InitWithTargets(targets []string) (string, error) {
 
 func (s Service) loadProjectState() (*manifest.Manifest, *lockfile.Lockfile, error) {
 	manifestPath := s.manifestPath()
-	doc, err := manifest.ReadFile(manifestPath)
+	doc, err := s.readManifest(manifestPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil, fmt.Errorf("%s not found; %s", manifestPath, s.initHint())
@@ -154,6 +168,43 @@ func (s Service) loadProjectState() (*manifest.Manifest, *lockfile.Lockfile, err
 	}
 
 	return doc, lf, nil
+}
+
+func (s Service) validateManifestTargets(doc *manifest.Manifest) error {
+	if err := s.validateTargetSet(doc.Targets, "manifest targets"); err != nil {
+		return err
+	}
+	for _, skill := range doc.Skills {
+		if err := s.validateTargetSet(skill.Targets, fmt.Sprintf("skill %q targets", skill.Name)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s Service) validateTargetSet(targets []string, context string) error {
+	seenNames := make(map[string]struct{}, len(targets))
+	seenDirs := make(map[string]string, len(targets))
+	for _, rawTarget := range targets {
+		targetName := strings.TrimSpace(rawTarget)
+		if targetName == "" {
+			return fmt.Errorf("%s: target names must not be empty", context)
+		}
+		if _, ok := seenNames[targetName]; ok {
+			return fmt.Errorf("%s: duplicate target %q", context, targetName)
+		}
+		seenNames[targetName] = struct{}{}
+
+		dir, err := s.skillDir(targetName)
+		if err != nil {
+			return fmt.Errorf("%s: %w", context, err)
+		}
+		if previous, ok := seenDirs[dir]; ok {
+			return fmt.Errorf("%s: targets %q and %q resolve to the same directory %s", context, previous, targetName, dir)
+		}
+		seenDirs[dir] = targetName
+	}
+	return nil
 }
 
 func findSkill(skills []manifest.Skill, match func(manifest.Skill) bool) (manifest.Skill, bool) {

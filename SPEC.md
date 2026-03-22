@@ -91,6 +91,8 @@ Project-local manifest. Committed with the repository.
 
 `ski init` creates this file with `version = 1`. If no targets are selected or passed, it starts with `targets = []`.
 
+`ski` validates the active-scope manifest before running command-specific work. Invalid target names, duplicate targets, and multiple targets that resolve to the same directory are rejected at manifest load time.
+
 ```toml
 version = 1
 targets = ["claude", "dir:./agent-skills/claude"]  # default targets for all skills

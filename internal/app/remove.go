@@ -22,7 +22,7 @@ func (s Service) Remove(name string, targetOverride []string) error {
 		}
 		return fmt.Errorf("read %s: %w", manifestPath, err)
 	}
-	doc, err := manifest.ReadFile(manifestPath)
+	doc, err := s.readManifest(manifestPath)
 	if err != nil {
 		return fmt.Errorf("read %s: %w", manifestPath, err)
 	}

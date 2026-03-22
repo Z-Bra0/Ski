@@ -34,7 +34,7 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 		}
 		return nil, nil, fmt.Errorf("read %s: %w", path, err)
 	}
-	doc, err := manifest.ReadFile(path)
+	doc, err := s.readManifest(path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read %s: %w", path, err)
 	}

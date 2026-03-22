@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 
 	"github.com/Z-Bra0/Ski/internal/lockfile"
-	"github.com/Z-Bra0/Ski/internal/manifest"
 	"github.com/Z-Bra0/Ski/internal/store"
 )
 
@@ -21,7 +20,7 @@ type plannedInstall struct {
 // Returns the number of skills processed.
 func (s Service) Install() (int, error) {
 	manifestPath := s.manifestPath()
-	doc, err := manifest.ReadFile(manifestPath)
+	doc, err := s.readManifest(manifestPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return 0, fmt.Errorf("%s not found; %s", manifestPath, s.initHint())
