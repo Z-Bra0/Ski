@@ -8,30 +8,6 @@ import (
 	"strings"
 )
 
-type Builtin struct {
-	Name       string
-	ProjectDir string
-	GlobalDir  string
-}
-
-var builtins = []Builtin{
-	{Name: "claude", ProjectDir: filepath.Join(".claude", "skills"), GlobalDir: filepath.Join(".claude", "skills")},
-	{Name: "codex", ProjectDir: filepath.Join(".codex", "skills"), GlobalDir: filepath.Join(".codex", "skills")},
-	{Name: "cursor", ProjectDir: filepath.Join(".cursor", "skills"), GlobalDir: filepath.Join(".cursor", "skills")},
-	{Name: "openclaw", ProjectDir: filepath.Join(".openclaw", "skills"), GlobalDir: filepath.Join(".openclaw", "skills")},
-	{Name: "opencode", ProjectDir: filepath.Join(".opencode", "skills"), GlobalDir: filepath.Join(".config", "opencode", "skills")},
-	{Name: "goose", ProjectDir: filepath.Join(".goose", "skills"), GlobalDir: filepath.Join(".config", "goose", "skills")},
-	{Name: "agents", ProjectDir: filepath.Join(".agents", "skills"), GlobalDir: filepath.Join(".config", "agents", "skills")},
-}
-
-var builtinsByName = func() map[string]Builtin {
-	out := make(map[string]Builtin, len(builtins))
-	for _, builtin := range builtins {
-		out[builtin.Name] = builtin
-	}
-	return out
-}()
-
 const customDirPrefix = "dir:"
 
 // LinkAll links a skill into every target directory in project scope.
