@@ -48,7 +48,12 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 		return nil, nil, err
 	}
 
-	requestedSkills, err := resolveSkillSelection(discovered, selectedSkills, addAll, nameOverride)
+	requestedSkills := append([]string(nil), selectedSkills...)
+	if len(requestedSkills) == 0 {
+		requestedSkills = append(requestedSkills, src.Skills...)
+	}
+
+	requestedSkills, err = resolveSkillSelection(discovered, requestedSkills, addAll, nameOverride)
 	if err != nil {
 		return nil, nil, err
 	}

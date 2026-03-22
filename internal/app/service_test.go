@@ -154,6 +154,61 @@ func TestAddSelectedUsesSkillLevelTargetOverride(t *testing.T) {
 	}
 }
 
+func TestAddSelectedHonorsLegacySourceSelectorsWithoutExplicitSelection(t *testing.T) {
+	t.Parallel()
+
+	repo := createMultiSkillRepo(t, "skill-pack", []multiSkillSpec{
+		{Path: filepath.Join("skills", "alpha-skill"), Name: "alpha-skill"},
+		{Path: filepath.Join("skills", "beta-skill"), Name: "beta-skill"},
+	})
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	manifestPath := filepath.Join(projectDir, manifest.FileName)
+	if err := manifest.WriteFile(manifestPath, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills:  []manifest.Skill{},
+	}); err != nil {
+		t.Fatalf("WriteFile(manifest) error = %v", err)
+	}
+
+	svc := Service{
+		ProjectDir: projectDir,
+		HomeDir:    homeDir,
+	}
+
+	added, warnings, err := svc.AddSelected("git:"+repo.URL+"##beta-skill", nil, "", false, nil)
+	if err != nil {
+		t.Fatalf("AddSelected() error = %v", err)
+	}
+	if got, want := added, []string{"beta-skill"}; !sameStrings(got, want) {
+		t.Fatalf("added = %#v, want %#v", got, want)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v, want none", warnings)
+	}
+
+	doc, err := manifest.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("ReadFile(manifest) error = %v", err)
+	}
+	wantManifest := manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills: []manifest.Skill{
+			{
+				Name:          "beta-skill",
+				Source:        "git:" + repo.URL,
+				UpstreamSkill: "beta-skill",
+			},
+		},
+	}
+	if !reflect.DeepEqual(*doc, wantManifest) {
+		t.Fatalf("manifest = %#v, want %#v", *doc, wantManifest)
+	}
+}
+
 func TestInitWithTargetsWritesSelectedTargets(t *testing.T) {
 	t.Parallel()
 
