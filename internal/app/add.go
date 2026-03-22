@@ -193,33 +193,13 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 		added = append(added, localName)
 	}
 
-	if err := ensureParentDir(lockPath); err != nil {
-		return nil, nil, fmt.Errorf("mkdir %s: %w", filepath.Dir(lockPath), err)
-	}
-	if err := lockfile.WriteFile(lockPath, nextLock); err != nil {
-		return nil, nil, fmt.Errorf("write %s: %w", lockPath, err)
-	}
-
-	if err := ensureParentDir(path); err != nil {
-		return nil, nil, fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
-	}
-	if err := manifest.WriteFile(path, nextDoc); err != nil {
-		if restoreErr := restoreProjectFiles(path, originalManifestData, lockPath, originalLockData, hadLockfile); restoreErr != nil {
-			return nil, nil, fmt.Errorf("write %s: %w (rollback failed: %v)", path, err, restoreErr)
-		}
-		return nil, nil, fmt.Errorf("write %s: %w", path, err)
-	}
-
-	linked := make([]plannedAdd, 0, len(planned))
-	for _, plan := range planned {
-		if err := s.linkAll(plan.Targets, plan.Name, plan.StorePath); err != nil {
-			rollbackErr := s.rollbackAddSelected(linked, path, originalManifestData, lockPath, originalLockData, hadLockfile)
-			if rollbackErr != nil {
-				return nil, nil, fmt.Errorf("%w (rollback failed: %v)", err, rollbackErr)
-			}
-			return nil, nil, err
-		}
-		linked = append(linked, plan)
+	if err := s.commitAddPlans(
+		planned,
+		path, originalManifestData,
+		lockPath, originalLockData, hadLockfile,
+		nextDoc, nextLock,
+	); err != nil {
+		return nil, nil, err
 	}
 
 	return added, append([]skill.ValidationWarning(nil), warnings...), nil
@@ -328,6 +308,46 @@ func (s Service) preflightAddLinks(targets []string, name, storePath string) err
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("lstat %s: %w", linkPath, err)
 		}
+	}
+	return nil
+}
+
+// commitAddPlans writes the updated lockfile and manifest to disk, then
+// creates symlinks for each planned skill. On any failure it rolls back all
+// on-disk changes made during this call.
+func (s Service) commitAddPlans(
+	planned []plannedAdd,
+	manifestPath string, originalManifestData []byte,
+	lockPath string, originalLockData []byte, hadLockfile bool,
+	nextDoc manifest.Manifest, nextLock lockfile.Lockfile,
+) error {
+	if err := ensureParentDir(lockPath); err != nil {
+		return fmt.Errorf("mkdir %s: %w", filepath.Dir(lockPath), err)
+	}
+	if err := lockfile.WriteFile(lockPath, nextLock); err != nil {
+		return fmt.Errorf("write %s: %w", lockPath, err)
+	}
+
+	if err := ensureParentDir(manifestPath); err != nil {
+		return fmt.Errorf("mkdir %s: %w", filepath.Dir(manifestPath), err)
+	}
+	if err := manifest.WriteFile(manifestPath, nextDoc); err != nil {
+		if restoreErr := restoreProjectFiles(manifestPath, originalManifestData, lockPath, originalLockData, hadLockfile); restoreErr != nil {
+			return fmt.Errorf("write %s: %w (rollback failed: %v)", manifestPath, err, restoreErr)
+		}
+		return fmt.Errorf("write %s: %w", manifestPath, err)
+	}
+
+	linked := make([]plannedAdd, 0, len(planned))
+	for _, plan := range planned {
+		if err := s.linkAll(plan.Targets, plan.Name, plan.StorePath); err != nil {
+			rollbackErr := s.rollbackAddSelected(linked, manifestPath, originalManifestData, lockPath, originalLockData, hadLockfile)
+			if rollbackErr != nil {
+				return fmt.Errorf("%w (rollback failed: %v)", err, rollbackErr)
+			}
+			return err
+		}
+		linked = append(linked, plan)
 	}
 	return nil
 }
