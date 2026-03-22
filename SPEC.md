@@ -191,8 +191,9 @@ If `--target` flags are provided, `ski init` writes them into the new manifest.
 
 If no `--target` flags are provided and `ski init` is running on a TTY, it prompts for built-in targets such as:
 
-- `claude`, `codex`, `cursor`, `openclaw`
-- `opencode`, `goose`, and `agents`
+- `cursor`, `claude`, `copilot`, `codex`
+- `windsurf`, `gemini`, `antigravity`, `opencode`
+- `openclaw`, `goose`, and `agents`
 
 Custom target directories are not prompted for during `ski init`. Add them later by editing the manifest manually, or pass them explicitly with `--target dir:<path>`.
 
@@ -309,6 +310,10 @@ Global scope uses the same `targets` field but resolves it against the global sc
 
 | Adapter | Project-local skill directory |
 |---------|------------------------------|
+| `copilot` | `./.github/skills/` |
+| `windsurf` | `./.windsurf/skills/` |
+| `gemini` | `./.gemini/skills/` |
+| `antigravity` | `./.agent/skills/` |
 | `claude` | `./.claude/skills/` |
 | `codex` | `./.codex/skills/` |
 | `cursor` | `./.cursor/skills/` |
@@ -319,6 +324,10 @@ Global scope uses the same `targets` field but resolves it against the global sc
 
 | Adapter | Global skill directory |
 |---------|------------------------|
+| `copilot` | `~/.github/skills/` |
+| `windsurf` | `~/.codeium/windsurf/skills/` |
+| `gemini` | `~/.gemini/skills/` |
+| `antigravity` | `~/.gemini/antigravity/skills/` |
 | `claude` | `~/.claude/skills/` |
 | `codex` | `~/.codex/skills/` |
 | `cursor` | `~/.cursor/skills/` |
