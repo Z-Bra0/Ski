@@ -26,6 +26,12 @@ func (s Service) Remove(name string, targetOverride []string) error {
 	if err != nil {
 		return fmt.Errorf("read %s: %w", manifestPath, err)
 	}
+	if len(targetOverride) > 0 {
+		targetOverride, err = s.normalizeManifestTargets(doc, targetOverride, "target override")
+		if err != nil {
+			return err
+		}
+	}
 
 	ms, ok := findSkill(doc.Skills, func(skill manifest.Skill) bool { return skill.Name == name })
 	if !ok {
@@ -50,7 +56,7 @@ func (s Service) Remove(name string, targetOverride []string) error {
 		effectiveTargets = intersectStrings(effectiveTargets, targetOverride)
 	}
 
-	changes, err := s.planRemoveTargetChanges(effectiveTargets, name)
+	changes, err := s.planRemoveTargetChanges(doc, effectiveTargets, name)
 	if err != nil {
 		return fmt.Errorf("remove symlinks: %w", err)
 	}
@@ -113,10 +119,14 @@ func (s Service) Remove(name string, targetOverride []string) error {
 	return nil
 }
 
-func (s Service) planRemoveTargetChanges(targets []string, name string) ([]updateTargetChange, error) {
+func (s Service) planRemoveTargetChanges(doc *manifest.Manifest, targets []string, name string) ([]updateTargetChange, error) {
 	changes := make([]updateTargetChange, 0, len(targets))
 	for _, targetName := range targets {
-		dir, err := s.skillDir(targetName)
+		dir, err := s.skillDirForManifest(doc, targetName)
+		if err != nil {
+			return nil, err
+		}
+		resolvedTarget, err := s.resolveManifestTarget(doc, targetName)
 		if err != nil {
 			return nil, err
 		}
@@ -131,7 +141,7 @@ func (s Service) planRemoveTargetChanges(targets []string, name string) ([]updat
 		}
 
 		changes = append(changes, updateTargetChange{
-			Target:       targetName,
+			Target:       resolvedTarget,
 			PreviousPath: previousPath,
 		})
 	}

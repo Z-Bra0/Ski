@@ -19,11 +19,7 @@ func newRemoveCmd(opts Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-
-			targetOverride, err := normalizeInitTargets(targets, svc, false)
-			if err != nil {
-				return err
-			}
+			targetOverride := append([]string(nil), targets...)
 
 			name, _, err := resolveSkillReferenceName(svc, args[0])
 			if err != nil {

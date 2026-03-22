@@ -10,8 +10,9 @@ func TestMarshalParseRoundTrip(t *testing.T) {
 	t.Parallel()
 
 	original := Manifest{
-		Version: 1,
-		Targets: []string{"claude", "codex"},
+		Version:     1,
+		Targets:     []string{"claude", "codex"},
+		TargetAlias: map[string]string{"cc": "dir:./agent/cc/skills"},
 		Skills: []Skill{
 			{
 				Name:          "repo-map",

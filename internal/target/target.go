@@ -19,16 +19,24 @@ const customDirPrefix = "dir:"
 
 // LinkAll links a skill into every target directory in project scope.
 func LinkAll(projectRoot string, targets []string, name, storePath string) error {
-	return linkAll(projectRoot, false, targets, name, storePath)
+	return linkAll(projectRoot, false, targets, name, storePath, nil)
 }
 
 // LinkAllGlobal links a skill into every target directory in global scope.
 func LinkAllGlobal(homeDir string, targets []string, name, storePath string) error {
-	return linkAll(homeDir, true, targets, name, storePath)
+	return linkAll(homeDir, true, targets, name, storePath, nil)
 }
 
-func linkAll(baseDir string, global bool, targets []string, name, storePath string) error {
-	dirs, err := resolveTargetDirs(baseDir, global, targets)
+func LinkAllWithAliases(projectRoot string, targets []string, name, storePath string, aliases map[string]string) error {
+	return linkAll(projectRoot, false, targets, name, storePath, aliases)
+}
+
+func LinkAllGlobalWithAliases(homeDir string, targets []string, name, storePath string, aliases map[string]string) error {
+	return linkAll(homeDir, true, targets, name, storePath, aliases)
+}
+
+func linkAll(baseDir string, global bool, targets []string, name, storePath string, aliases map[string]string) error {
+	dirs, err := resolveTargetDirs(baseDir, global, targets, aliases)
 	if err != nil {
 		return err
 	}
@@ -90,16 +98,24 @@ func linkDir(dir, name, storePath string) error {
 
 // UnlinkAll removes a skill link from every project-scoped target directory.
 func UnlinkAll(projectRoot string, targets []string, name string) error {
-	return unlinkAll(projectRoot, false, targets, name)
+	return unlinkAll(projectRoot, false, targets, name, nil)
 }
 
 // UnlinkAllGlobal removes a skill link from every global-scoped target directory.
 func UnlinkAllGlobal(homeDir string, targets []string, name string) error {
-	return unlinkAll(homeDir, true, targets, name)
+	return unlinkAll(homeDir, true, targets, name, nil)
 }
 
-func unlinkAll(baseDir string, global bool, targets []string, name string) error {
-	dirs, err := resolveTargetDirs(baseDir, global, targets)
+func UnlinkAllWithAliases(projectRoot string, targets []string, name string, aliases map[string]string) error {
+	return unlinkAll(projectRoot, false, targets, name, aliases)
+}
+
+func UnlinkAllGlobalWithAliases(homeDir string, targets []string, name string, aliases map[string]string) error {
+	return unlinkAll(homeDir, true, targets, name, aliases)
+}
+
+func unlinkAll(baseDir string, global bool, targets []string, name string, aliases map[string]string) error {
+	dirs, err := resolveTargetDirs(baseDir, global, targets, aliases)
 	if err != nil {
 		return err
 	}
@@ -149,15 +165,34 @@ func unlinkDir(dir, name string) error {
 
 // SkillDir resolves a target name to its project-scoped directory.
 func SkillDir(projectRoot, target string) (string, error) {
-	return skillDir(projectRoot, false, target)
+	return skillDir(projectRoot, false, target, nil)
 }
 
 // GlobalSkillDir resolves a target name to its global-scoped directory.
 func GlobalSkillDir(homeDir, target string) (string, error) {
-	return skillDir(homeDir, true, target)
+	return skillDir(homeDir, true, target, nil)
 }
 
-func skillDir(baseDir string, global bool, target string) (string, error) {
+func SkillDirWithAliases(projectRoot, target string, aliases map[string]string) (string, error) {
+	return skillDir(projectRoot, false, target, aliases)
+}
+
+func GlobalSkillDirWithAliases(homeDir, target string, aliases map[string]string) (string, error) {
+	return skillDir(homeDir, true, target, aliases)
+}
+
+func IsBuiltIn(targetName string) bool {
+	_, ok := dirs[targetName]
+	return ok
+}
+
+func skillDir(baseDir string, global bool, target string, aliases map[string]string) (string, error) {
+	resolvedTarget, err := ResolveAlias(aliases, target)
+	if err != nil {
+		return "", err
+	}
+	target = resolvedTarget
+
 	rel, ok := dirs[target]
 	if ok {
 		return resolveScopedDir(baseDir, filepath.Join(baseDir, rel), target)
@@ -214,11 +249,11 @@ func scopeRootLabel(global bool) string {
 	return "project root"
 }
 
-func resolveTargetDirs(baseDir string, global bool, targets []string) ([]string, error) {
+func resolveTargetDirs(baseDir string, global bool, targets []string, aliases map[string]string) ([]string, error) {
 	seen := make(map[string]string, len(targets))
 	dirsOut := make([]string, 0, len(targets))
 	for _, targetName := range targets {
-		dir, err := skillDir(baseDir, global, targetName)
+		dir, err := skillDir(baseDir, global, targetName, aliases)
 		if err != nil {
 			return nil, err
 		}
@@ -229,6 +264,21 @@ func resolveTargetDirs(baseDir string, global bool, targets []string) ([]string,
 		dirsOut = append(dirsOut, dir)
 	}
 	return dirsOut, nil
+}
+
+func ResolveAlias(aliases map[string]string, targetName string) (string, error) {
+	if aliases == nil {
+		return targetName, nil
+	}
+	targetSpec, ok := aliases[targetName]
+	if !ok {
+		return targetName, nil
+	}
+	targetSpec = strings.TrimSpace(targetSpec)
+	if targetSpec == "" {
+		return "", fmt.Errorf("target alias %q: target is required", targetName)
+	}
+	return targetSpec, nil
 }
 
 func expandHome(path string, homeDir string) string {

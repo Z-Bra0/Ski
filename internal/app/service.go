@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -31,6 +32,8 @@ type Service struct {
 type MultiSkillSelectionError struct {
 	Skills []string
 }
+
+var targetAliasNamePattern = regexp.MustCompile(`^[a-z0-9-]+$`)
 
 func (e MultiSkillSelectionError) Error() string {
 	return fmt.Sprintf("multiple skills found in repository: %s", strings.Join(e.Skills, ", "))
@@ -89,6 +92,41 @@ func (s Service) skillDir(targetName string) (string, error) {
 		return target.GlobalSkillDir(s.HomeDir, targetName)
 	}
 	return target.SkillDir(s.ProjectDir, targetName)
+}
+
+func (s Service) skillDirForManifest(doc *manifest.Manifest, targetName string) (string, error) {
+	if s.Global {
+		return target.GlobalSkillDirWithAliases(s.HomeDir, targetName, doc.TargetAlias)
+	}
+	return target.SkillDirWithAliases(s.ProjectDir, targetName, doc.TargetAlias)
+}
+
+func (s Service) linkAllForManifest(doc *manifest.Manifest, targets []string, name, storePath string) error {
+	if s.linkAllFn != nil {
+		resolvedTargets, err := s.resolveManifestTargets(doc, targets)
+		if err != nil {
+			return err
+		}
+		return s.linkAllFn(resolvedTargets, name, storePath)
+	}
+	if s.Global {
+		return target.LinkAllGlobalWithAliases(s.HomeDir, targets, name, storePath, doc.TargetAlias)
+	}
+	return target.LinkAllWithAliases(s.ProjectDir, targets, name, storePath, doc.TargetAlias)
+}
+
+func (s Service) unlinkAllForManifest(doc *manifest.Manifest, targets []string, name string) error {
+	if s.unlinkAllFn != nil {
+		resolvedTargets, err := s.resolveManifestTargets(doc, targets)
+		if err != nil {
+			return err
+		}
+		return s.unlinkAllFn(resolvedTargets, name)
+	}
+	if s.Global {
+		return target.UnlinkAllGlobalWithAliases(s.HomeDir, targets, name, doc.TargetAlias)
+	}
+	return target.UnlinkAllWithAliases(s.ProjectDir, targets, name, doc.TargetAlias)
 }
 
 func ensureParentDir(path string) error {
@@ -171,40 +209,89 @@ func (s Service) loadProjectState() (*manifest.Manifest, *lockfile.Lockfile, err
 }
 
 func (s Service) validateManifestTargets(doc *manifest.Manifest) error {
-	if err := s.validateTargetSet(doc.Targets, "manifest targets"); err != nil {
+	if err := s.validateTargetAliases(doc); err != nil {
+		return err
+	}
+	if _, err := s.normalizeManifestTargets(doc, doc.Targets, "manifest targets"); err != nil {
 		return err
 	}
 	for _, skill := range doc.Skills {
-		if err := s.validateTargetSet(skill.Targets, fmt.Sprintf("skill %q targets", skill.Name)); err != nil {
+		if _, err := s.normalizeManifestTargets(doc, skill.Targets, fmt.Sprintf("skill %q targets", skill.Name)); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (s Service) validateTargetSet(targets []string, context string) error {
+func (s Service) validateTargetAliases(doc *manifest.Manifest) error {
+	for alias, targetSpec := range doc.TargetAlias {
+		if strings.TrimSpace(alias) == "" {
+			return fmt.Errorf("target aliases: alias names must not be empty")
+		}
+		if !targetAliasNamePattern.MatchString(alias) {
+			return fmt.Errorf("target aliases: alias %q must use lowercase letters, numbers, and hyphens only", alias)
+		}
+		if target.IsBuiltIn(alias) {
+			return fmt.Errorf("target aliases: alias %q conflicts with a built-in target", alias)
+		}
+		targetSpec = strings.TrimSpace(targetSpec)
+		if targetSpec == "" {
+			return fmt.Errorf("target aliases: alias %q target is required", alias)
+		}
+		var err error
+		if s.Global {
+			_, err = target.GlobalSkillDir(s.HomeDir, targetSpec)
+		} else {
+			_, err = target.SkillDir(s.ProjectDir, targetSpec)
+		}
+		if err != nil {
+			return fmt.Errorf("target aliases: alias %q: %w", alias, err)
+		}
+	}
+	return nil
+}
+
+func (s Service) normalizeManifestTargets(doc *manifest.Manifest, targets []string, context string) ([]string, error) {
+	normalized := make([]string, 0, len(targets))
 	seenNames := make(map[string]struct{}, len(targets))
 	seenDirs := make(map[string]string, len(targets))
 	for _, rawTarget := range targets {
 		targetName := strings.TrimSpace(rawTarget)
 		if targetName == "" {
-			return fmt.Errorf("%s: target names must not be empty", context)
+			return nil, fmt.Errorf("%s: target names must not be empty", context)
 		}
 		if _, ok := seenNames[targetName]; ok {
-			return fmt.Errorf("%s: duplicate target %q", context, targetName)
+			return nil, fmt.Errorf("%s: duplicate target %q", context, targetName)
 		}
 		seenNames[targetName] = struct{}{}
 
-		dir, err := s.skillDir(targetName)
+		dir, err := s.skillDirForManifest(doc, targetName)
 		if err != nil {
-			return fmt.Errorf("%s: %w", context, err)
+			return nil, fmt.Errorf("%s: %w", context, err)
 		}
 		if previous, ok := seenDirs[dir]; ok {
-			return fmt.Errorf("%s: targets %q and %q resolve to the same directory %s", context, previous, targetName, dir)
+			return nil, fmt.Errorf("%s: targets %q and %q resolve to the same directory %s", context, previous, targetName, dir)
 		}
 		seenDirs[dir] = targetName
+		normalized = append(normalized, targetName)
 	}
-	return nil
+	return normalized, nil
+}
+
+func (s Service) resolveManifestTargets(doc *manifest.Manifest, targets []string) ([]string, error) {
+	resolved := make([]string, 0, len(targets))
+	for _, targetName := range targets {
+		targetSpec, err := s.resolveManifestTarget(doc, targetName)
+		if err != nil {
+			return nil, err
+		}
+		resolved = append(resolved, targetSpec)
+	}
+	return resolved, nil
+}
+
+func (s Service) resolveManifestTarget(doc *manifest.Manifest, targetName string) (string, error) {
+	return target.ResolveAlias(doc.TargetAlias, targetName)
 }
 
 func findSkill(skills []manifest.Skill, match func(manifest.Skill) bool) (manifest.Skill, bool) {
@@ -260,9 +347,13 @@ func upsertLockSkill(lf *lockfile.Lockfile, skill lockfile.Skill) {
 
 func cloneManifest(doc manifest.Manifest) manifest.Manifest {
 	clone := manifest.Manifest{
-		Version: doc.Version,
-		Targets: append([]string(nil), doc.Targets...),
-		Skills:  make([]manifest.Skill, len(doc.Skills)),
+		Version:     doc.Version,
+		Targets:     append([]string(nil), doc.Targets...),
+		TargetAlias: make(map[string]string, len(doc.TargetAlias)),
+		Skills:      make([]manifest.Skill, len(doc.Skills)),
+	}
+	for name, targetSpec := range doc.TargetAlias {
+		clone.TargetAlias[name] = targetSpec
 	}
 	for i, skill := range doc.Skills {
 		clone.Skills[i] = manifest.Skill{

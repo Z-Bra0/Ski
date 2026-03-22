@@ -156,14 +156,14 @@ func (s Service) doctorSkillFindings(doc *manifest.Manifest, skill manifest.Skil
 
 	for _, targetName := range targetsToInspect {
 		shouldExist := slices.Contains(expectedTargets, targetName)
-		findings = append(findings, s.doctorTargetFindings(skill.Name, targetName, storePath, shouldExist)...)
+		findings = append(findings, s.doctorTargetFindings(doc, skill.Name, targetName, storePath, shouldExist)...)
 	}
 
 	return findings
 }
 
-func (s Service) doctorTargetFindings(skillName, targetName, storePath string, shouldExist bool) []DoctorFinding {
-	dir, err := s.skillDir(targetName)
+func (s Service) doctorTargetFindings(doc *manifest.Manifest, skillName, targetName, storePath string, shouldExist bool) []DoctorFinding {
+	dir, err := s.skillDirForManifest(doc, targetName)
 	if err != nil {
 		return []DoctorFinding{{
 			Skill:   skillName,

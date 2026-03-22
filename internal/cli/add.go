@@ -26,10 +26,7 @@ func newAddCmd(opts Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			targetOverride, err := normalizeInitTargets(targets, svc, false)
-			if err != nil {
-				return err
-			}
+			targetOverride := append([]string(nil), targets...)
 			src, err := source.ParseGit(args[0])
 			if err != nil {
 				refInfo, isRef, refErr := resolveSkillReferenceInfo(svc, args[0])

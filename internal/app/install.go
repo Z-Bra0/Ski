@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/Z-Bra0/Ski/internal/lockfile"
+	"github.com/Z-Bra0/Ski/internal/manifest"
 	"github.com/Z-Bra0/Ski/internal/store"
 )
 
@@ -62,10 +63,10 @@ func (s Service) Install() (int, error) {
 		}
 
 		effectiveTargets := effectiveTargetsForSkill(doc, mSkill)
-		if _, err := s.preflightInstallLinks(effectiveTargets, mSkill.Name, stored.Path); err != nil {
+		if _, err := s.preflightInstallLinks(doc, effectiveTargets, mSkill.Name, stored.Path); err != nil {
 			return 0, fmt.Errorf("skill %q: %w", mSkill.Name, err)
 		}
-		changes, err := s.planUpdateTargetChanges(mSkill, effectiveTargets, lockedEntry, hasLock, stored.Path)
+		changes, err := s.planUpdateTargetChanges(doc, mSkill, effectiveTargets, lockedEntry, hasLock, stored.Path)
 		if err != nil {
 			return 0, fmt.Errorf("skill %q: %w", mSkill.Name, err)
 		}
@@ -122,11 +123,11 @@ func (s Service) Install() (int, error) {
 	return len(plans), nil
 }
 
-func (s Service) preflightInstallLinks(targets []string, name, storePath string) ([]string, error) {
+func (s Service) preflightInstallLinks(doc *manifest.Manifest, targets []string, name, storePath string) ([]string, error) {
 	seen := make(map[string]string, len(targets))
 	targetsToCreate := make([]string, 0, len(targets))
 	for _, targetName := range targets {
-		dir, err := s.skillDir(targetName)
+		dir, err := s.skillDirForManifest(doc, targetName)
 		if err != nil {
 			return nil, err
 		}

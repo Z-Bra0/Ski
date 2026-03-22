@@ -91,11 +91,14 @@ Project-local manifest. Committed with the repository.
 
 `ski init` creates this file with `version = 1`. If no targets are selected or passed, it starts with `targets = []`.
 
-`ski` validates the active-scope manifest before running command-specific work. Invalid target names, duplicate targets, and multiple targets that resolve to the same directory are rejected at manifest load time.
+`ski` validates the active-scope manifest before running command-specific work. Invalid target names, invalid target aliases, duplicate targets, and multiple targets that resolve to the same directory are rejected at manifest load time.
 
 ```toml
 version = 1
-targets = ["claude", "dir:./agent-skills/claude"]  # default targets for all skills
+targets = ["claude", "cc"]  # default targets for all skills
+
+[target_alias]
+cc = "dir:./agent-skills/claude"
 
 [[skill]]
 name = "repo-map"
@@ -109,6 +112,8 @@ source = "git:https://github.com/org/audit-solidity.git"
 upstream_skill = "audit-solidity"
 targets = ["claude"]              # overrides global targets
 ```
+
+`[target_alias]` defines manifest-local target shortcuts. Alias names must use lowercase letters, numbers, and hyphens, cannot conflict with built-in targets, and currently expand to a built-in target or a `dir:<path>` target spec.
 
 ---
 
@@ -295,6 +300,8 @@ Planned later: `github` as a convenience alias over Git-hosted repositories.
 Targets are scope-dependent. In local scope, `targets = ["claude"]` means `./.claude/skills/` relative to the repo root that contains `ski.toml`.
 
 Custom project-local target directories are also allowed via `dir:<relative-path>`, for example `dir:./agent-skills/claude` or `dir:.tools/skills`.
+
+Project and global manifests may also define `[target_alias]` entries that map short names such as `cc` to built-in or `dir:<path>` target specs. Aliases can be used anywhere a target name is accepted after the manifest already exists.
 
 Custom targets must resolve to a subdirectory within the project root. Absolute paths, `../` escapes, and paths that resolve to the project root itself such as `dir:.` are rejected in v1.
 
