@@ -17,10 +17,9 @@ const (
 
 // Manifest is the active-scope TOML configuration stored in ski.toml.
 type Manifest struct {
-	Version     int               `toml:"version"`
-	Targets     []string          `toml:"targets"`
-	TargetAlias map[string]string `toml:"target_alias,omitempty"`
-	Skills      []Skill           `toml:"skill,omitempty"`
+	Version int      `toml:"version"`
+	Targets []string `toml:"targets"`
+	Skills  []Skill  `toml:"skill,omitempty"`
 }
 
 // Skill describes one declared skill entry inside a Manifest.

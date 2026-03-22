@@ -79,7 +79,7 @@ func (s Service) Info(name string) (DetailedSkillInfo, error) {
 	}
 
 	for _, targetName := range targets {
-		targetInfo, err := s.inspectTargetLink(doc, targetName, skill.Name, info.StorePath, info.StoreError)
+		targetInfo, err := s.inspectTargetLink(targetName, skill.Name, info.StorePath, info.StoreError)
 		if err != nil {
 			return DetailedSkillInfo{}, err
 		}
@@ -89,8 +89,8 @@ func (s Service) Info(name string) (DetailedSkillInfo, error) {
 	return info, nil
 }
 
-func (s Service) inspectTargetLink(doc *manifest.Manifest, targetName, skillName, expectedStorePath, storeError string) (TargetLinkInfo, error) {
-	dir, err := s.skillDirForManifest(doc, targetName)
+func (s Service) inspectTargetLink(targetName, skillName, expectedStorePath, storeError string) (TargetLinkInfo, error) {
+	dir, err := s.skillDir(targetName)
 	if err != nil {
 		return TargetLinkInfo{}, err
 	}

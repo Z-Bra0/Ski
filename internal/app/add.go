@@ -38,12 +38,6 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 	if err != nil {
 		return nil, nil, fmt.Errorf("read %s: %w", path, err)
 	}
-	if len(targetOverride) > 0 {
-		targetOverride, err = s.normalizeManifestTargets(doc, targetOverride, "target override")
-		if err != nil {
-			return nil, nil, err
-		}
-	}
 
 	src, err := s.prepareAddSource(rawSource)
 	if err != nil {
@@ -179,7 +173,7 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 			}
 			warnings = append(warnings, skillWarnings...)
 
-			if err := s.preflightAddLinks(doc, mergedTargets, localName, stored.Path); err != nil {
+			if err := s.preflightAddLinks(mergedTargets, localName, stored.Path); err != nil {
 				return nil, nil, err
 			}
 
@@ -213,7 +207,7 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 		}
 		warnings = append(warnings, skillWarnings...)
 
-		if err := s.preflightAddLinks(doc, effectiveTargets, localName, stored.Path); err != nil {
+		if err := s.preflightAddLinks(effectiveTargets, localName, stored.Path); err != nil {
 			return nil, nil, err
 		}
 
@@ -266,8 +260,8 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 
 	linked := make([]plannedAdd, 0, len(planned))
 	for _, plan := range planned {
-		if err := s.linkAllForManifest(&nextDoc, plan.Targets, plan.Name, plan.StorePath); err != nil {
-			rollbackErr := s.rollbackAddSelected(&nextDoc, linked, path, originalManifestData, lockPath, originalLockData, hadLockfile)
+		if err := s.linkAll(plan.Targets, plan.Name, plan.StorePath); err != nil {
+			rollbackErr := s.rollbackAddSelected(linked, path, originalManifestData, lockPath, originalLockData, hadLockfile)
 			if rollbackErr != nil {
 				return nil, nil, fmt.Errorf("%w (rollback failed: %v)", err, rollbackErr)
 			}
@@ -292,10 +286,10 @@ func findSkillByIdentity(skills []manifest.Skill, sourceValue, upstreamSkill str
 	return manifest.Skill{}, false, nil
 }
 
-func (s Service) preflightAddLinks(doc *manifest.Manifest, targets []string, name, storePath string) error {
+func (s Service) preflightAddLinks(targets []string, name, storePath string) error {
 	seen := make(map[string]string, len(targets))
 	for _, targetName := range targets {
-		dir, err := s.skillDirForManifest(doc, targetName)
+		dir, err := s.skillDir(targetName)
 		if err != nil {
 			return err
 		}
@@ -326,10 +320,10 @@ func (s Service) preflightAddLinks(doc *manifest.Manifest, targets []string, nam
 	return nil
 }
 
-func (s Service) rollbackAddSelected(doc *manifest.Manifest, linked []plannedAdd, manifestPath string, manifestData []byte, lockPath string, lockData []byte, hadLockfile bool) error {
+func (s Service) rollbackAddSelected(linked []plannedAdd, manifestPath string, manifestData []byte, lockPath string, lockData []byte, hadLockfile bool) error {
 	var rollbackErr error
 	for i := len(linked) - 1; i >= 0; i-- {
-		if err := s.unlinkAllForManifest(doc, linked[i].Targets, linked[i].Name); err != nil {
+		if err := s.unlinkAll(linked[i].Targets, linked[i].Name); err != nil {
 			rollbackErr = errors.Join(rollbackErr, err)
 		}
 	}

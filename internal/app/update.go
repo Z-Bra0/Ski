@@ -122,7 +122,7 @@ func (s Service) Update(name string) ([]UpdateInfo, error) {
 		}
 
 		targets := effectiveTargetsForSkill(doc, mSkill)
-		changes, err := s.planUpdateTargetChanges(doc, mSkill, targets, locked, hasLock, stored.Path)
+		changes, err := s.planUpdateTargetChanges(mSkill, targets, locked, hasLock, stored.Path)
 		if err != nil {
 			return nil, fmt.Errorf("skill %q: %w", mSkill.Name, err)
 		}
@@ -188,7 +188,7 @@ func (s Service) Update(name string) ([]UpdateInfo, error) {
 	return updates, nil
 }
 
-func (s Service) planUpdateTargetChanges(doc *manifest.Manifest, skill manifest.Skill, targets []string, locked lockfile.Skill, hasLock bool, desiredPath string) ([]updateTargetChange, error) {
+func (s Service) planUpdateTargetChanges(skill manifest.Skill, targets []string, locked lockfile.Skill, hasLock bool, desiredPath string) ([]updateTargetChange, error) {
 	targetsToInspect := append([]string(nil), targets...)
 	if hasLock {
 		targetsToInspect = unionStrings(targetsToInspect, locked.Targets)
@@ -196,11 +196,7 @@ func (s Service) planUpdateTargetChanges(doc *manifest.Manifest, skill manifest.
 
 	changes := make([]updateTargetChange, 0, len(targetsToInspect))
 	for _, targetName := range targetsToInspect {
-		dir, err := s.skillDirForManifest(doc, targetName)
-		if err != nil {
-			return nil, err
-		}
-		resolvedTarget, err := s.resolveManifestTarget(doc, targetName)
+		dir, err := s.skillDir(targetName)
 		if err != nil {
 			return nil, err
 		}
@@ -220,7 +216,7 @@ func (s Service) planUpdateTargetChanges(doc *manifest.Manifest, skill manifest.
 		}
 
 		changes = append(changes, updateTargetChange{
-			Target:       resolvedTarget,
+			Target:       targetName,
 			PreviousPath: previousPath,
 			DesiredPath:  nextPath,
 		})
