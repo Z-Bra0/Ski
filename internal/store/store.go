@@ -58,15 +58,15 @@ type discoveredSkillNameResult struct {
 
 // DiscoverGit fetches or loads a git repository snapshot from the shared store.
 func DiscoverGit(projectRoot, homeDir string, spec source.Git) (RepoResult, error) {
-	storeKey, err := spec.DeriveName()
+	storeKeys, err := deriveGitStoreKeys(spec)
 	if err != nil {
 		return RepoResult{}, err
 	}
+	primaryStoreKey := storeKeys[0]
 
 	// Reuse an existing stored snapshot when we can cheaply resolve the commit.
 	if commit, ok := resolveStoreCommit(projectRoot, spec); ok {
-		storePath := filepath.Join(homeDir, ".ski", "store", "git", storeKey, commit)
-		repo, err := loadStoredRepo(storePath, commit)
+		repo, err := loadStoredRepoForAnyKey(homeDir, storeKeys, commit)
 		if err == nil {
 			return repo, nil
 		}
@@ -97,8 +97,8 @@ func DiscoverGit(projectRoot, homeDir string, spec source.Git) (RepoResult, erro
 		return RepoResult{}, fmt.Errorf("resolve commit: %w", err)
 	}
 
-	storePath := filepath.Join(homeDir, ".ski", "store", "git", storeKey, commit)
-	repo, err := loadStoredRepo(storePath, commit)
+	storePath := gitStorePath(homeDir, primaryStoreKey, commit)
+	repo, err := loadStoredRepoForAnyKey(homeDir, storeKeys, commit)
 	if err == nil {
 		return repo, nil
 	}
@@ -186,13 +186,12 @@ func EnsureGitWithWarnings(projectRoot, homeDir string, spec source.Git, expecte
 
 // FindGit locates an already-stored git snapshot at a specific commit.
 func FindGit(homeDir string, spec source.Git, commit string, expectedName string) (Result, error) {
-	storeKey, err := spec.DeriveName()
+	storeKeys, err := deriveGitStoreKeys(spec)
 	if err != nil {
 		return Result{}, err
 	}
 
-	storePath := filepath.Join(homeDir, ".ski", "store", "git", storeKey, commit)
-	repo, err := loadStoredRepo(storePath, commit)
+	repo, err := loadStoredRepoForAnyKey(homeDir, storeKeys, commit)
 	if err != nil {
 		return Result{}, err
 	}
@@ -208,6 +207,38 @@ func FindGit(homeDir string, spec source.Git, commit string, expectedName string
 	}
 
 	return Result{Commit: commit, Integrity: integrity, Path: selected.Path}, nil
+}
+
+func deriveGitStoreKeys(spec source.Git) ([]string, error) {
+	primary, err := spec.DeriveName()
+	if err != nil {
+		return nil, err
+	}
+
+	keys := []string{primary}
+	if legacy, err := spec.DeriveLegacyName(); err == nil && legacy != "" && legacy != primary {
+		keys = append(keys, legacy)
+	}
+	return keys, nil
+}
+
+func gitStorePath(homeDir, storeKey, commit string) string {
+	return filepath.Join(homeDir, ".ski", "store", "git", storeKey, commit)
+}
+
+func loadStoredRepoForAnyKey(homeDir string, keys []string, commit string) (RepoResult, error) {
+	for _, key := range keys {
+		storePath := gitStorePath(homeDir, key, commit)
+		repo, err := loadStoredRepo(storePath, commit)
+		if err == nil {
+			return repo, nil
+		}
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		return RepoResult{}, err
+	}
+	return RepoResult{}, os.ErrNotExist
 }
 
 func resolveStoreCommit(projectRoot string, spec source.Git) (string, bool) {

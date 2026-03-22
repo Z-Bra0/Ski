@@ -17,6 +17,7 @@ Current design decisions and their rationale.
 - `@ref` syntax for pinning — `git:<url>@v1.0.0` or `@commitSHA` keeps refs explicit while staying close to familiar package-manager conventions.
 - `github` is deferred — it is mostly UX sugar over Git-hosted repositories and does not change the core fetch model.
 - `skillhub` / `clawhub` are deferred — API formats and trust models are unknown, so they are outside the first release.
+- Git store keys are namespaced for remote paths — use host + path namespace to avoid same-repo-name collisions across orgs; legacy basename keys are still read as a compatibility fallback.
 
 ## Skill Discovery And UX
 

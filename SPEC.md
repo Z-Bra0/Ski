@@ -79,7 +79,7 @@ If the local name collides with an existing skill, `ski add` errors and asks the
 
 | Adapter | Store key | Example path |
 |---------|-----------|--------------|
-| `git` | last URL segment | `git/my-skill/ef5678/` |
+| `git` | remote host + repo path namespace (single-segment paths keep legacy repo-only key) | `git/github.com-acme-my-skill/ef5678/` |
 
 For multi-skill repositories, the stored commit directory is the full repository snapshot with `.git/` removed. Agent symlinks point to the selected skill directory inside that snapshot.
 

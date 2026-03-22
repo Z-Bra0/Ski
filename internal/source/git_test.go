@@ -206,11 +206,16 @@ func TestGitDeriveName(t *testing.T) {
 		{
 			name:   "https url",
 			source: Git{URL: "https://github.com/acme/repo-map.git"},
-			want:   "repo-map",
+			want:   "github.com-acme-repo-map",
 		},
 		{
 			name:   "scp style url",
 			source: Git{URL: "git@github.com:acme/repo-map.git"},
+			want:   "github.com-acme-repo-map",
+		},
+		{
+			name:   "single segment remote path keeps legacy key",
+			source: Git{URL: "git://127.0.0.1:9418/repo-map"},
 			want:   "repo-map",
 		},
 		{
@@ -242,6 +247,25 @@ func TestGitDeriveName(t *testing.T) {
 				t.Fatalf("DeriveName() = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestGitDeriveNameAvoidsRemoteNamespaceCollisions(t *testing.T) {
+	t.Parallel()
+
+	a := Git{URL: "https://github.com/org-a/repo-map.git"}
+	b := Git{URL: "https://github.com/org-b/repo-map.git"}
+
+	nameA, err := a.DeriveName()
+	if err != nil {
+		t.Fatalf("DeriveName(a) error = %v", err)
+	}
+	nameB, err := b.DeriveName()
+	if err != nil {
+		t.Fatalf("DeriveName(b) error = %v", err)
+	}
+	if nameA == nameB {
+		t.Fatalf("DeriveName() collision: both resolved to %q", nameA)
 	}
 }
 
