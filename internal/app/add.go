@@ -13,13 +13,9 @@ import (
 )
 
 type plannedAdd struct {
-	Name          string
-	Source        string
-	UpstreamSkill string
-	Targets       []string
-	StorePath     string
-	Lock          lockfile.Skill
-	Manifest      manifest.Skill
+	Name      string
+	Targets   []string
+	StorePath string
 }
 
 // Add parses a git source, fetches it into the store, links to targets,
@@ -47,54 +43,14 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 	if len(src.Skills) > 0 && len(selectedSkills) > 0 && !sameStrings(src.Skills, selectedSkills) {
 		return nil, nil, fmt.Errorf("selected skills %v do not match source selectors %v", selectedSkills, src.Skills)
 	}
-
 	discovered, err := store.DiscoverGit(s.sourceResolveDir(), s.HomeDir, src)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	requestedSkills := append([]string(nil), selectedSkills...)
-	if len(requestedSkills) == 0 {
-		requestedSkills = append(requestedSkills, src.Skills...)
-	}
-	explicitSelection := len(requestedSkills) > 0
-	if !explicitSelection && !addAll {
-		selectable := make([]string, 0, len(discovered.Skills))
-		for _, discoveredSkill := range discovered.Skills {
-			if _, _, err := skill.ValidateDirWithWarnings(discoveredSkill.Path, discoveredSkill.Name); err == nil {
-				selectable = append(selectable, discoveredSkill.Name)
-			}
-		}
-		if len(selectable) > 1 {
-			return nil, nil, MultiSkillSelectionError{Skills: selectable}
-		}
-	}
-	if (!explicitSelection || addAll) && len(discovered.InvalidSkills) > 0 {
-		return nil, nil, discovered.InvalidSkills[0].Err
-	}
-	if !explicitSelection || addAll {
-		for _, discoveredSkill := range discovered.Skills {
-			if _, _, err := skill.ValidateDirWithWarnings(discoveredSkill.Path, discoveredSkill.Name); err != nil {
-				return nil, nil, err
-			}
-		}
-	}
-	if explicitSelection {
-		for _, requestedSkill := range requestedSkills {
-			for _, invalid := range discovered.InvalidSkills {
-				if invalid.CandidateName == requestedSkill {
-					return nil, nil, invalid.Err
-				}
-			}
-		}
-	}
-	requestedSkills, err = resolveRequestedSkills(discovered.Skills, requestedSkills)
+	requestedSkills, err := resolveSkillSelection(discovered, selectedSkills, addAll, nameOverride)
 	if err != nil {
 		return nil, nil, err
-	}
-
-	if nameOverride != "" && len(requestedSkills) != 1 {
-		return nil, nil, fmt.Errorf("name override can only be used when adding one skill")
 	}
 
 	lockPath := s.lockPath()
@@ -230,13 +186,9 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 		nextDoc.Skills = append(nextDoc.Skills, manifestEntry)
 
 		planned = append(planned, plannedAdd{
-			Name:          localName,
-			Source:        canonical,
-			UpstreamSkill: selectedSkillName,
-			Targets:       append([]string(nil), effectiveTargets...),
-			StorePath:     stored.Path,
-			Lock:          lockEntry,
-			Manifest:      manifestEntry,
+			Name:      localName,
+			Targets:   append([]string(nil), effectiveTargets...),
+			StorePath: stored.Path,
 		})
 		added = append(added, localName)
 	}
@@ -271,6 +223,66 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 	}
 
 	return added, append([]skill.ValidationWarning(nil), warnings...), nil
+}
+
+// resolveSkillSelection validates the user's skill selection against the
+// discovered repository state and returns the final ordered list of upstream
+// skill names to add.
+func resolveSkillSelection(discovered store.RepoResult, selectedSkills []string, addAll bool, nameOverride string) ([]string, error) {
+	requested := append([]string(nil), selectedSkills...)
+	explicitSelection := len(requested) > 0
+
+	if explicitSelection {
+		for _, req := range requested {
+			for _, invalid := range discovered.InvalidSkills {
+				if invalid.CandidateName == req {
+					return nil, invalid.Err
+				}
+			}
+		}
+	} else {
+		if !addAll {
+			// Build selectable list from only valid skills so that a broken
+			// sibling doesn't crowd out the real multi-skill prompt. If only
+			// one valid skill exists we fall through; the subsequent
+			// ValidateDirWithWarnings pass will catch the invalid one.
+			selectable := make([]string, 0, len(discovered.Skills))
+			for _, ds := range discovered.Skills {
+				if _, _, err := skill.ValidateDirWithWarnings(ds.Path, ds.Name); err == nil {
+					selectable = append(selectable, ds.Name)
+				}
+			}
+			if len(selectable) > 1 {
+				return nil, MultiSkillSelectionError{Skills: selectable}
+			}
+		}
+		// Reject any store-level parse failures before attempting to validate.
+		if len(discovered.InvalidSkills) > 0 {
+			return nil, discovered.InvalidSkills[0].Err
+		}
+		// Validate every discovered skill when adding without explicit selection.
+		for _, ds := range discovered.Skills {
+			if _, _, err := skill.ValidateDirWithWarnings(ds.Path, ds.Name); err != nil {
+				return nil, err
+			}
+		}
+		if addAll {
+			for _, ds := range discovered.Skills {
+				requested = append(requested, ds.Name)
+			}
+		}
+	}
+
+	resolved, err := resolveRequestedSkills(discovered.Skills, requested)
+	if err != nil {
+		return nil, err
+	}
+
+	if nameOverride != "" && len(resolved) != 1 {
+		return nil, fmt.Errorf("name override can only be used when adding one skill")
+	}
+
+	return resolved, nil
 }
 
 func findSkillByIdentity(skills []manifest.Skill, sourceValue, upstreamSkill string) (manifest.Skill, bool, error) {
