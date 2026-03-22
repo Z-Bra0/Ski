@@ -221,35 +221,33 @@ func resolveSkillSelection(discovered store.RepoResult, selectedSkills []string,
 			}
 		}
 	} else {
-		if !addAll {
-			// Build selectable list from only valid skills so that a broken
-			// sibling doesn't crowd out the real multi-skill prompt. If only
-			// one valid skill exists we fall through; the subsequent
-			// ValidateDirWithWarnings pass will catch the invalid one.
-			selectable := make([]string, 0, len(discovered.Skills))
-			for _, ds := range discovered.Skills {
-				if _, _, err := skill.ValidateDirWithWarnings(ds.Path, ds.Name); err == nil {
-					selectable = append(selectable, ds.Name)
+		// Single pass: validate each skill once, recording selectable names and
+		// the first validation error. This avoids a second ValidateDirWithWarnings
+		// scan that was previously needed for the full-validation step below.
+		selectable := make([]string, 0, len(discovered.Skills))
+		var firstValidationErr error
+		for _, ds := range discovered.Skills {
+			if _, _, err := skill.ValidateDirWithWarnings(ds.Path, ds.Name); err != nil {
+				if firstValidationErr == nil {
+					firstValidationErr = err
 				}
-			}
-			if len(selectable) > 1 {
-				return nil, MultiSkillSelectionError{Skills: selectable}
+			} else {
+				selectable = append(selectable, ds.Name)
 			}
 		}
-		// Reject any store-level parse failures before attempting to validate.
+
+		if !addAll && len(selectable) > 1 {
+			return nil, MultiSkillSelectionError{Skills: selectable}
+		}
+		// Reject any store-level parse failures before reporting dir errors.
 		if len(discovered.InvalidSkills) > 0 {
 			return nil, discovered.InvalidSkills[0].Err
 		}
-		// Validate every discovered skill when adding without explicit selection.
-		for _, ds := range discovered.Skills {
-			if _, _, err := skill.ValidateDirWithWarnings(ds.Path, ds.Name); err != nil {
-				return nil, err
-			}
+		if firstValidationErr != nil {
+			return nil, firstValidationErr
 		}
 		if addAll {
-			for _, ds := range discovered.Skills {
-				requested = append(requested, ds.Name)
-			}
+			requested = append(requested, selectable...)
 		}
 	}
 
@@ -325,6 +323,9 @@ func (s Service) commitAddPlans(
 		return fmt.Errorf("mkdir %s: %w", filepath.Dir(lockPath), err)
 	}
 	if err := lockfile.WriteFile(lockPath, nextLock); err != nil {
+		if restoreErr := restoreProjectFiles(manifestPath, originalManifestData, lockPath, originalLockData, hadLockfile); restoreErr != nil {
+			return fmt.Errorf("write %s: %w (rollback failed: %v)", lockPath, err, restoreErr)
+		}
 		return fmt.Errorf("write %s: %w", lockPath, err)
 	}
 
@@ -332,8 +333,12 @@ func (s Service) commitAddPlans(
 		return fmt.Errorf("mkdir %s: %w", filepath.Dir(manifestPath), err)
 	}
 	if err := manifest.WriteFile(manifestPath, nextDoc); err != nil {
-		if restoreErr := restoreProjectFiles(manifestPath, originalManifestData, lockPath, originalLockData, hadLockfile); restoreErr != nil {
-			return fmt.Errorf("write %s: %w (rollback failed: %v)", manifestPath, err, restoreErr)
+		// Always attempt to restore the lockfile independently — if manifest
+		// restoration also fails we still want the lockfile consistent.
+		manifestRestoreErr := os.WriteFile(manifestPath, originalManifestData, 0o644)
+		lockRestoreErr := restoreLockfile(lockPath, originalLockData, hadLockfile)
+		if rollbackErr := errors.Join(manifestRestoreErr, lockRestoreErr); rollbackErr != nil {
+			return fmt.Errorf("write %s: %w (rollback failed: %v)", manifestPath, err, rollbackErr)
 		}
 		return fmt.Errorf("write %s: %w", manifestPath, err)
 	}

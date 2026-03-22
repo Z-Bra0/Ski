@@ -254,6 +254,92 @@ func TestCommitAddPlansRollsBackOnLinkFailure(t *testing.T) {
 	if len(doc.Skills) != 0 {
 		t.Fatalf("manifest skills after rollback = %v, want empty", doc.Skills)
 	}
+	// lockfile was created by commitAddPlans; rollback must remove it
+	// (originalLockData was nil → hadLockfile=false → restore deletes it)
+	if _, statErr := os.Stat(lockPath); !os.IsNotExist(statErr) {
+		t.Fatalf("lockfile should not exist after rollback, stat error = %v", statErr)
+	}
+}
+
+func TestCommitAddPlansRestoresLockfileWhenManifestWriteFails(t *testing.T) {
+	// Cannot be parallel: temporarily makes a directory read-only.
+
+	// Keep the lockfile in one dir and the manifest in a separate dir so we
+	// can block only manifest writes without blocking lockfile restoration.
+	lockDir := t.TempDir()
+	manifestDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	lockPath := filepath.Join(lockDir, lockfile.FileName)
+	manifestPath := filepath.Join(manifestDir, manifest.FileName)
+
+	// Write a known-good lockfile so there is distinct content to restore.
+	goodLock := lockfile.Lockfile{Version: 1}
+	if err := lockfile.WriteFile(lockPath, goodLock); err != nil {
+		t.Fatalf("WriteFile(lockfile) error = %v", err)
+	}
+	originalLockData, _ := os.ReadFile(lockPath)
+
+	// Write the manifest.
+	if err := manifest.WriteFile(manifestPath, manifest.Manifest{Version: 1, Targets: []string{"claude"}}); err != nil {
+		t.Fatalf("WriteFile(manifest) error = %v", err)
+	}
+	originalManifestData, _ := os.ReadFile(manifestPath)
+
+	// Make the manifest file itself read-only so os.WriteFile fails on it.
+	// The lockfile lives in a separate directory and stays writable.
+	if err := os.Chmod(manifestPath, 0o444); err != nil {
+		t.Fatalf("Chmod(manifestPath) error = %v", err)
+	}
+	t.Cleanup(func() { os.Chmod(manifestPath, 0o644) })
+
+	// nextLock has different content from the original; after rollback the
+	// on-disk lockfile must match originalLockData, not nextLock.
+	nextLock := lockfile.Lockfile{
+		Version: 1,
+		Skills: []lockfile.Skill{{
+			Name:          "alpha-skill",
+			Source:        "git:https://example.com/skills",
+			UpstreamSkill: "alpha-skill",
+			Commit:        "abc1234",
+			Integrity:     "sha256:aabbcc",
+			Targets:       []string{"claude"},
+		}},
+	}
+
+	svc := Service{
+		ProjectDir:  lockDir,
+		HomeDir:     homeDir,
+		linkAllFn:   func(targets []string, name, sp string) error { return nil },
+		unlinkAllFn: func(targets []string, name string) error { return nil },
+	}
+
+	err := svc.commitAddPlans(
+		[]plannedAdd{{Name: "alpha-skill", Targets: []string{"claude"}, StorePath: t.TempDir()}},
+		manifestPath, originalManifestData,
+		lockPath, originalLockData, true,
+		manifest.Manifest{Version: 1, Targets: []string{"claude"}},
+		nextLock,
+	)
+
+	// Restore manifest dir permission before any assertions.
+	if err2 := os.Chmod(manifestDir, 0o755); err2 != nil {
+		t.Fatalf("Chmod restore error = %v", err2)
+	}
+
+	if err == nil {
+		t.Fatal("commitAddPlans() error = nil, want manifest write failure")
+	}
+
+	// The lockfile must be restored to its original content, not left with
+	// the updated nextLock content that was written before the manifest failed.
+	restoredData, readErr := os.ReadFile(lockPath)
+	if readErr != nil {
+		t.Fatalf("ReadFile(lockfile) after manifest failure error = %v; lockfile was not restored", readErr)
+	}
+	if string(restoredData) != string(originalLockData) {
+		t.Fatalf("lockfile after manifest failure =\n%s\nwant original:\n%s", restoredData, originalLockData)
+	}
 }
 
 // prepareCommitState writes a minimal manifest and lockfile and returns their
