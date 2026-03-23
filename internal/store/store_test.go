@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/Z-Bra0/Ski/internal/source"
+	"github.com/Z-Bra0/Ski/internal/testutil"
 )
 
 func TestMoveDirIntoStoreFallsBackOnCrossDeviceRename(t *testing.T) {
@@ -179,6 +180,49 @@ description: [unterminated
 	}
 	if !strings.Contains(err.Error(), filepath.Join(homeDir, ".ski", "store", "git", "skill-pack")) {
 		t.Fatalf("DiscoverGit() error = %v, want stable store path", err)
+	}
+}
+
+func TestFindGitFallsBackToLegacyStoreKey(t *testing.T) {
+	t.Parallel()
+
+	repo := testutil.NewSkillRepo(t, "acme/repo-map", "repo-map")
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+	spec := source.Git{URL: repo.URL}
+
+	stored, err := EnsureGit(projectDir, homeDir, spec, "repo-map")
+	if err != nil {
+		t.Fatalf("EnsureGit() error = %v", err)
+	}
+
+	primaryKey, err := spec.DeriveName()
+	if err != nil {
+		t.Fatalf("DeriveName() error = %v", err)
+	}
+	legacyKey, err := spec.DeriveLegacyName()
+	if err != nil {
+		t.Fatalf("DeriveLegacyName() error = %v", err)
+	}
+	if primaryKey == legacyKey {
+		t.Fatalf("test setup: primary and legacy keys are equal: %q", primaryKey)
+	}
+
+	primaryPath := filepath.Join(homeDir, ".ski", "store", "git", primaryKey, stored.Commit)
+	legacyPath := filepath.Join(homeDir, ".ski", "store", "git", legacyKey, stored.Commit)
+	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll(legacy parent) error = %v", err)
+	}
+	if err := os.Rename(primaryPath, legacyPath); err != nil {
+		t.Fatalf("Rename(primary->legacy) error = %v", err)
+	}
+
+	reloaded, err := FindGit(homeDir, spec, stored.Commit, "repo-map")
+	if err != nil {
+		t.Fatalf("FindGit() error = %v", err)
+	}
+	if !strings.HasPrefix(reloaded.Path, legacyPath) {
+		t.Fatalf("FindGit() path = %q, want legacy-key path under %q", reloaded.Path, legacyPath)
 	}
 }
 

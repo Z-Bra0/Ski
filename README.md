@@ -4,7 +4,7 @@ Managing AI agent skills across tools is still manual, duplicated, and hard to r
 
 Teams copy skill folders into `.claude/skills`, `.codex/skills`, and other agent directories by hand, then lose track of which repo, tag, or commit each project is actually using.
 
-`ski` turns that into a package-manager workflow for agent skills. Install skills from Git into Claude, Codex, Cursor, and OpenClaw with a manifest, lockfile, and shared store.
+`ski` turns that into a package-manager workflow for agent skills. Install skills from Git into Claude, Codex, Cursor, and OpenClaw with a manifest, lockfile, and shared store-backed copied installs.
 
 ---
 
@@ -50,7 +50,7 @@ ski init --target claude
 ski add https://github.com/org/repo-map.git
 ```
 
-`ski add` is the first-time workflow: it updates `ski.toml`, resolves and writes `ski.lock.json`, fetches the skill into the store, and links it into the configured targets.
+`ski add` is the first-time workflow: it updates `ski.toml`, resolves and writes `ski.lock.json`, fetches the skill into the store, and copies it into the configured targets.
 
 Use `ski install` later to restore skills from `ski.toml` and `ski.lock.json`, for example in a fresh clone.
 
@@ -65,7 +65,7 @@ ski init --target claude --target codex
 ski add https://github.com/org/repo-map.git
 ```
 
-This keeps one stored copy of the skill and links it into both `.claude/skills` and `.codex/skills`.
+This keeps one stored snapshot of the skill and materializes matching copies into both `.claude/skills` and `.codex/skills`.
 
 Pin a team audit skill to a specific commit:
 
@@ -128,6 +128,7 @@ ski version
 - `ski version` reports the CLI build version. Dev builds print `dev`; release builds use the version passed to `make release VERSION=...`.
 - `make release VERSION=...` also writes `dist/ski_<version>_checksums.txt` for installer verification.
 - Local targets write into the project. `-g` uses `~/.ski/global.toml` and global agent directories instead.
+- Built-in targets include `cursor`, `claude`, `copilot`, `codex`, `windsurf`, `gemini`, `antigravity`, `opencode`, `openclaw`, `goose`, and `agents`.
 - Custom target folders use `dir:`. For example: `dir:./agent-skills/claude`.
 
 ---

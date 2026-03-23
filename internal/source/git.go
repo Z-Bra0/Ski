@@ -16,6 +16,8 @@ const skillSelectorSeparator = "##"
 
 var commitRefPattern = regexp.MustCompile(`^[0-9a-fA-F]{7,40}$`)
 var skillSelectorPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+var storeKeyUnsafePattern = regexp.MustCompile(`[^a-z0-9._-]+`)
+var storeKeyDashPattern = regexp.MustCompile(`-+`)
 
 // NoMatchingRevisionError reports that a requested git ref resolved to no revision.
 type NoMatchingRevisionError struct {
@@ -138,6 +140,36 @@ func (g Git) String() string {
 
 // DeriveName returns the repository-derived store key for the source.
 func (g Git) DeriveName() (string, error) {
+	legacy, err := g.DeriveLegacyName()
+	if err != nil {
+		return "", err
+	}
+	// Keep single-segment paths and non-remote callers stable.
+	if !g.IsRemote() {
+		return legacy, nil
+	}
+
+	segments := splitPathSegments(g.pathForName())
+	if len(segments) <= 1 {
+		return legacy, nil
+	}
+
+	parts := make([]string, 0, len(segments)+1)
+	if host := g.hostForName(); host != "" {
+		parts = append(parts, host)
+	}
+	parts = append(parts, segments...)
+	parts[len(parts)-1] = strings.TrimSuffix(parts[len(parts)-1], ".git")
+
+	key := normalizeStoreKey(strings.Join(parts, "-"))
+	if key == "" {
+		return "", fmt.Errorf("derive name from %q: missing repository name", g.URL)
+	}
+	return key, nil
+}
+
+// DeriveLegacyName returns the historical repository-derived store key.
+func (g Git) DeriveLegacyName() (string, error) {
 	p := strings.TrimSuffix(g.pathForName(), "/")
 	if p == "" {
 		return "", fmt.Errorf("derive name from %q: missing repository name", g.URL)
@@ -185,6 +217,48 @@ func (g Git) pathForName() string {
 	}
 
 	return g.URL
+}
+
+func (g Git) hostForName() string {
+	if strings.Contains(g.URL, "://") {
+		if parsed, err := url.Parse(g.URL); err == nil {
+			return parsed.Hostname()
+		}
+	}
+
+	if hostSep := strings.Index(g.URL, ":"); hostSep >= 0 && !strings.Contains(g.URL[:hostSep], "/") {
+		host := g.URL[:hostSep]
+		if at := strings.LastIndex(host, "@"); at >= 0 && at < len(host)-1 {
+			host = host[at+1:]
+		}
+		return host
+	}
+	return ""
+}
+
+func splitPathSegments(raw string) []string {
+	raw = strings.Trim(raw, "/")
+	if raw == "" {
+		return nil
+	}
+
+	parts := strings.Split(raw, "/")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" || part == "." || part == ".." {
+			continue
+		}
+		out = append(out, part)
+	}
+	return out
+}
+
+func normalizeStoreKey(raw string) string {
+	key := strings.ToLower(strings.TrimSpace(raw))
+	key = storeKeyUnsafePattern.ReplaceAllString(key, "-")
+	key = storeKeyDashPattern.ReplaceAllString(key, "-")
+	return strings.Trim(key, "-.")
 }
 
 // IsRemote reports whether the source URL refers to a remote git endpoint.

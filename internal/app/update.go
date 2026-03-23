@@ -8,7 +8,6 @@ import (
 	"slices"
 
 	"github.com/Z-Bra0/Ski/internal/lockfile"
-	"github.com/Z-Bra0/Ski/internal/manifest"
 	"github.com/Z-Bra0/Ski/internal/source"
 	"github.com/Z-Bra0/Ski/internal/store"
 )
@@ -29,6 +28,9 @@ type updateTargetChange struct {
 	Target       string
 	PreviousPath string
 	DesiredPath  string
+	BackupPath   string // temp backup of original content; set after destructive force apply
+	ForceRemove  bool   // remove even without a known PreviousPath (no lockfile entry)
+	ForceReplace bool   // replace even without a known PreviousPath (directory exists, origin unknown)
 }
 
 // CheckUpdates reports which selected skills have newer upstream commits available.
@@ -115,6 +117,19 @@ func (s Service) Update(name string) ([]UpdateInfo, error) {
 			continue
 		}
 
+		previousStorePath := ""
+		previousTargets := []string(nil)
+		if hasLock {
+			previousTargets = append(previousTargets, locked.Targets...)
+			currentSrc := src
+			currentSrc.Ref = locked.Commit
+			previousStored, err := store.FindGit(s.HomeDir, currentSrc, locked.Commit, mSkill.Name)
+			if err != nil {
+				return nil, fmt.Errorf("skill %q: %w", mSkill.Name, err)
+			}
+			previousStorePath = previousStored.Path
+		}
+
 		src.Ref = latestCommit
 		stored, err := store.EnsureGit(s.sourceResolveDir(), s.HomeDir, src, mSkill.Name)
 		if err != nil {
@@ -122,7 +137,7 @@ func (s Service) Update(name string) ([]UpdateInfo, error) {
 		}
 
 		targets := effectiveTargetsForSkill(doc, mSkill)
-		changes, err := s.planUpdateTargetChanges(mSkill, targets, locked, hasLock, stored.Path)
+		changes, err := s.planUpdateTargetChanges(mSkill.Name, targets, previousTargets, previousStorePath, stored.Path)
 		if err != nil {
 			return nil, fmt.Errorf("skill %q: %w", mSkill.Name, err)
 		}
@@ -164,8 +179,9 @@ func (s Service) Update(name string) ([]UpdateInfo, error) {
 	applied := make([]plannedUpdate, 0, len(plans))
 	for _, plan := range plans {
 		appliedCount := 0
-		for _, change := range plan.Changes {
-			if err := s.applyUpdateTargetChange(plan.Name, change); err != nil {
+		for i := range plan.Changes {
+			backupPath, err := s.applyUpdateTargetChange(plan.Name, plan.Changes[i])
+			if err != nil {
 				rollbackPlans := append([]plannedUpdate(nil), applied...)
 				if appliedCount > 0 {
 					rollbackPlans = append(rollbackPlans, plannedUpdate{
@@ -179,45 +195,72 @@ func (s Service) Update(name string) ([]UpdateInfo, error) {
 				}
 				return nil, fmt.Errorf("skill %q: %w", plan.Name, err)
 			}
+			plan.Changes[i].BackupPath = backupPath
 			appliedCount++
 		}
 		plan.Changes = plan.Changes[:appliedCount]
 		applied = append(applied, plan)
 	}
 
+	cleanupBackups(applied)
 	return updates, nil
 }
 
-func (s Service) planUpdateTargetChanges(skill manifest.Skill, targets []string, locked lockfile.Skill, hasLock bool, desiredPath string) ([]updateTargetChange, error) {
-	targetsToInspect := append([]string(nil), targets...)
-	if hasLock {
-		targetsToInspect = unionStrings(targetsToInspect, locked.Targets)
-	}
+func (s Service) planUpdateTargetChanges(skillName string, desiredTargets []string, previousTargets []string, previousPath, desiredPath string) ([]updateTargetChange, error) {
+	targetsToInspect := unionStrings(desiredTargets, previousTargets)
 
 	changes := make([]updateTargetChange, 0, len(targetsToInspect))
 	for _, targetName := range targetsToInspect {
-		dir, err := s.skillDir(targetName)
+		hadPrevious := slices.Contains(previousTargets, targetName)
+		expectedCurrentPath := desiredPath
+		if hadPrevious {
+			expectedCurrentPath = previousPath
+		} else if previousPath == "" {
+			// No lock entry at all — skip drift check on existing installs.
+			expectedCurrentPath = ""
+		}
+
+		inspection, err := s.inspectTarget(targetName, skillName, expectedCurrentPath)
 		if err != nil {
 			return nil, err
 		}
-
-		linkPath := filepath.Join(dir, skill.Name)
-		previousPath, err := readExistingSymlink(linkPath)
-		if err != nil {
-			return nil, err
-		}
-
+		shouldExist := slices.Contains(desiredTargets, targetName)
 		nextPath := ""
-		if slices.Contains(targets, targetName) {
+		currentPath := ""
+		if shouldExist {
 			nextPath = desiredPath
 		}
-		if previousPath == nextPath {
-			continue
+
+		switch inspection.Status {
+		case targetStatusMissing:
+			if !shouldExist {
+				continue
+			}
+		case targetStatusInstalled:
+			currentPath = expectedCurrentPath
+			if currentPath == nextPath {
+				continue
+			}
+			if currentPath == "" && nextPath != "" {
+				// Directory exists but origin unknown (no lockfile) — replace it.
+				changes = append(changes, updateTargetChange{
+					Target:       targetName,
+					DesiredPath:  nextPath,
+					ForceReplace: true,
+				})
+				continue
+			}
+		case targetStatusLegacySymlink:
+			return nil, legacySymlinkInstallError(inspection.Path)
+		case targetStatusDrifted:
+			return nil, driftedTargetError(inspection.Path)
+		default:
+			return nil, unexpectedTargetEntryError(inspection.Path)
 		}
 
 		changes = append(changes, updateTargetChange{
 			Target:       targetName,
-			PreviousPath: previousPath,
+			PreviousPath: currentPath,
 			DesiredPath:  nextPath,
 		})
 	}
@@ -225,49 +268,66 @@ func (s Service) planUpdateTargetChanges(skill manifest.Skill, targets []string,
 	return changes, nil
 }
 
-func readExistingSymlink(linkPath string) (string, error) {
-	info, err := os.Lstat(linkPath)
-	switch {
-	case errors.Is(err, os.ErrNotExist):
+// applyUpdateTargetChange applies a single target change and returns the path
+// to a temporary backup of the original content when the change is a forced
+// operation (ForceRemove or ForceReplace). Callers must clean up the backup
+// on success or use it to restore the original on rollback.
+func (s Service) applyUpdateTargetChange(name string, change updateTargetChange) (backupPath string, err error) {
+	if change.ForceRemove {
+		backupPath, err = s.backupTarget(change.Target, name)
+		if err != nil {
+			return "", fmt.Errorf("backup before force-remove: %w", err)
+		}
+		if err := s.removeAll([]string{change.Target}, name); err != nil {
+			os.RemoveAll(backupPath)
+			return "", err
+		}
+		return backupPath, nil
+	}
+	if change.ForceReplace && change.DesiredPath != "" {
+		backupPath, err = s.backupTarget(change.Target, name)
+		if err != nil {
+			return "", fmt.Errorf("backup before force-replace: %w", err)
+		}
+		if err := s.replaceTarget(change.Target, name, change.DesiredPath); err != nil {
+			os.RemoveAll(backupPath)
+			return "", err
+		}
+		return backupPath, nil
+	}
+	if change.PreviousPath == change.DesiredPath {
 		return "", nil
-	case err != nil:
-		return "", fmt.Errorf("lstat %s: %w", linkPath, err)
-	case info.Mode()&os.ModeSymlink == 0:
-		return "", fmt.Errorf("%s already exists and is not a symlink", linkPath)
 	}
 
-	current, err := os.Readlink(linkPath)
-	if err != nil {
-		return "", fmt.Errorf("readlink %s: %w", linkPath, err)
+	switch {
+	case change.PreviousPath == "" && change.DesiredPath != "":
+		return "", s.materializeAll([]string{change.Target}, name, change.DesiredPath)
+	case change.PreviousPath != "" && change.DesiredPath == "":
+		return "", s.removeAll([]string{change.Target}, name)
+	case change.PreviousPath != "" && change.DesiredPath != "":
+		return "", s.replaceTarget(change.Target, name, change.DesiredPath)
+	default:
+		return "", nil
 	}
-	return current, nil
 }
 
-func (s Service) applyUpdateTargetChange(name string, change updateTargetChange) error {
-	if change.PreviousPath == change.DesiredPath {
-		return nil
-	}
-
-	if change.PreviousPath != "" {
-		if err := s.unlinkAll([]string{change.Target}, name); err != nil {
-			return err
+func reverseUpdateTargetChange(change updateTargetChange) updateTargetChange {
+	if change.BackupPath != "" {
+		// A backup of the original was captured before the force operation.
+		// Restore from the backup: the current on-disk content is what was
+		// written by the forward apply (DesiredPath), and the backup holds
+		// what should be put back.
+		return updateTargetChange{
+			Target:       change.Target,
+			PreviousPath: change.DesiredPath,
+			DesiredPath:  change.BackupPath,
 		}
 	}
-	if change.DesiredPath == "" {
-		return nil
+	return updateTargetChange{
+		Target:       change.Target,
+		PreviousPath: change.DesiredPath,
+		DesiredPath:  change.PreviousPath,
 	}
-
-	if err := s.linkAll([]string{change.Target}, name, change.DesiredPath); err != nil {
-		if change.PreviousPath == "" {
-			return err
-		}
-		restoreErr := s.linkAll([]string{change.Target}, name, change.PreviousPath)
-		if restoreErr != nil {
-			return fmt.Errorf("%w (restore failed: %v)", err, restoreErr)
-		}
-		return err
-	}
-	return nil
 }
 
 func (s Service) rollbackUpdate(applied []plannedUpdate, lockPath string, lockData []byte, hadLockfile bool) error {
@@ -275,26 +335,29 @@ func (s Service) rollbackUpdate(applied []plannedUpdate, lockPath string, lockDa
 	for i := len(applied) - 1; i >= 0; i-- {
 		for j := len(applied[i].Changes) - 1; j >= 0; j-- {
 			change := applied[i].Changes[j]
-			if change.PreviousPath == change.DesiredPath {
+			if change.PreviousPath == change.DesiredPath && change.BackupPath == "" {
 				continue
 			}
-			if change.DesiredPath != "" {
-				if err := s.unlinkAll([]string{change.Target}, applied[i].Name); err != nil {
-					rollbackErr = errors.Join(rollbackErr, err)
-					continue
-				}
-			}
-			if change.PreviousPath != "" {
-				if err := s.linkAll([]string{change.Target}, applied[i].Name, change.PreviousPath); err != nil {
-					rollbackErr = errors.Join(rollbackErr, err)
-				}
+			if _, err := s.applyUpdateTargetChange(applied[i].Name, reverseUpdateTargetChange(change)); err != nil {
+				rollbackErr = errors.Join(rollbackErr, err)
 			}
 		}
 	}
+	cleanupBackups(applied)
 	if err := restoreLockfile(lockPath, lockData, hadLockfile); err != nil {
 		rollbackErr = errors.Join(rollbackErr, err)
 	}
 	return rollbackErr
+}
+
+func cleanupBackups(plans []plannedUpdate) {
+	for _, plan := range plans {
+		for _, change := range plan.Changes {
+			if change.BackupPath != "" {
+				os.RemoveAll(change.BackupPath)
+			}
+		}
+	}
 }
 
 func resolveUpdateCommit(projectDir string, src source.Git) (string, bool, error) {

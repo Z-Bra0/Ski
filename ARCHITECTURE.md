@@ -14,8 +14,8 @@ Application Core
 ├── Source Adapters      (fetch skills from git in the MVP)
 ├── Skill Store          (~/.ski/store — central on-disk cache)
 ├── Manifest/Lockfile    (read/write local and global state)
-├── Target Adapters      (link skills into .claude/skills, .codex/skills, etc.)
-└── Doctor / Maintenance (symlink checks, consistency validation)
+├── Target Adapters      (materialize skill directories into .claude/skills, .codex/skills, .opencode/skills, etc.)
+└── Doctor / Maintenance (drift checks, consistency validation)
 ```
 
 ---
@@ -24,9 +24,9 @@ Application Core
 
 **Central store** — all skills land in `~/.ski/store/<adapter>/<name>/<commit>/`, shared across projects. Deduplication and caching come for free.
 
-**Symlinks, not copies** — agent directories hold symlinks into the store. One skill file, many targets.
+**Store plus materialized installs** — the store keeps one cached snapshot per resolved commit, while agent directories receive copied skill folders from that snapshot.
 
-**Two-sided adapters** — source adapters normalize fetching; target adapters normalize linking. New registries and agent platforms are just new adapters.
+**Two-sided adapters** — source adapters normalize fetching; target adapters normalize install/remove/replace behavior. New registries and agent platforms are just new adapters.
 
 ---
 
@@ -43,7 +43,7 @@ ski/
     lockfile/           # ski.lock.json read/write
     store/              # central store: fetch, cache, gc
     source/             # source adapters (git/ in the MVP)
-    target/             # target adapters (claude/, codex/, cursor/, openclaw/)
+    target/             # target adapters and built-in target registry
 ```
 
 ---

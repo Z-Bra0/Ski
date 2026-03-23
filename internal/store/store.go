@@ -1,11 +1,8 @@
 package store
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/Z-Bra0/Ski/internal/fsutil"
 	"github.com/Z-Bra0/Ski/internal/skill"
 	"github.com/Z-Bra0/Ski/internal/source"
 )
@@ -58,15 +56,15 @@ type discoveredSkillNameResult struct {
 
 // DiscoverGit fetches or loads a git repository snapshot from the shared store.
 func DiscoverGit(projectRoot, homeDir string, spec source.Git) (RepoResult, error) {
-	storeKey, err := spec.DeriveName()
+	storeKeys, err := deriveGitStoreKeys(spec)
 	if err != nil {
 		return RepoResult{}, err
 	}
+	primaryStoreKey := storeKeys[0]
 
 	// Reuse an existing stored snapshot when we can cheaply resolve the commit.
 	if commit, ok := resolveStoreCommit(projectRoot, spec); ok {
-		storePath := filepath.Join(homeDir, ".ski", "store", "git", storeKey, commit)
-		repo, err := loadStoredRepo(storePath, commit)
+		repo, err := loadStoredRepoForAnyKey(homeDir, storeKeys, commit)
 		if err == nil {
 			return repo, nil
 		}
@@ -97,8 +95,8 @@ func DiscoverGit(projectRoot, homeDir string, spec source.Git) (RepoResult, erro
 		return RepoResult{}, fmt.Errorf("resolve commit: %w", err)
 	}
 
-	storePath := filepath.Join(homeDir, ".ski", "store", "git", storeKey, commit)
-	repo, err := loadStoredRepo(storePath, commit)
+	storePath := gitStorePath(homeDir, primaryStoreKey, commit)
+	repo, err := loadStoredRepoForAnyKey(homeDir, storeKeys, commit)
 	if err == nil {
 		return repo, nil
 	}
@@ -186,13 +184,12 @@ func EnsureGitWithWarnings(projectRoot, homeDir string, spec source.Git, expecte
 
 // FindGit locates an already-stored git snapshot at a specific commit.
 func FindGit(homeDir string, spec source.Git, commit string, expectedName string) (Result, error) {
-	storeKey, err := spec.DeriveName()
+	storeKeys, err := deriveGitStoreKeys(spec)
 	if err != nil {
 		return Result{}, err
 	}
 
-	storePath := filepath.Join(homeDir, ".ski", "store", "git", storeKey, commit)
-	repo, err := loadStoredRepo(storePath, commit)
+	repo, err := loadStoredRepoForAnyKey(homeDir, storeKeys, commit)
 	if err != nil {
 		return Result{}, err
 	}
@@ -208,6 +205,38 @@ func FindGit(homeDir string, spec source.Git, commit string, expectedName string
 	}
 
 	return Result{Commit: commit, Integrity: integrity, Path: selected.Path}, nil
+}
+
+func deriveGitStoreKeys(spec source.Git) ([]string, error) {
+	primary, err := spec.DeriveName()
+	if err != nil {
+		return nil, err
+	}
+
+	keys := []string{primary}
+	if legacy, err := spec.DeriveLegacyName(); err == nil && legacy != "" && legacy != primary {
+		keys = append(keys, legacy)
+	}
+	return keys, nil
+}
+
+func gitStorePath(homeDir, storeKey, commit string) string {
+	return filepath.Join(homeDir, ".ski", "store", "git", storeKey, commit)
+}
+
+func loadStoredRepoForAnyKey(homeDir string, keys []string, commit string) (RepoResult, error) {
+	for _, key := range keys {
+		storePath := gitStorePath(homeDir, key, commit)
+		repo, err := loadStoredRepo(storePath, commit)
+		if err == nil {
+			return repo, nil
+		}
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		return RepoResult{}, err
+	}
+	return RepoResult{}, os.ErrNotExist
 }
 
 func resolveStoreCommit(projectRoot string, spec source.Git) (string, bool) {
@@ -473,7 +502,7 @@ func moveDirIntoStore(src, dst string) error {
 	defer os.RemoveAll(stageRoot)
 
 	stagePath := filepath.Join(stageRoot, filepath.Base(dst))
-	if err := copyTree(src, stagePath); err != nil {
+	if err := fsutil.CopyTree(src, stagePath); err != nil {
 		return fmt.Errorf("copy checkout into store staging dir: %w", err)
 	}
 	if err := renameDir(stagePath, dst); err != nil {
@@ -484,143 +513,7 @@ func moveDirIntoStore(src, dst string) error {
 
 // HashDir returns the canonical SHA-256 hash for a stored snapshot directory.
 func HashDir(root string) (string, error) {
-	hasher := sha256.New()
-	if err := hashDir(hasher, root, ""); err != nil {
-		return "", err
-	}
-	return "sha256:" + hex.EncodeToString(hasher.Sum(nil)), nil
-}
-
-func hashDir(w io.Writer, absPath, relPath string) error {
-	entries, err := os.ReadDir(absPath)
-	if err != nil {
-		return err
-	}
-
-	slices.SortFunc(entries, func(a, b os.DirEntry) int {
-		return strings.Compare(a.Name(), b.Name())
-	})
-
-	for _, entry := range entries {
-		name := entry.Name()
-		childAbs := filepath.Join(absPath, name)
-		childRel := filepath.ToSlash(filepath.Join(relPath, name))
-
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-
-		switch {
-		case entry.IsDir():
-			if _, err := io.WriteString(w, "dir\x00"+childRel+"\x00"); err != nil {
-				return err
-			}
-			if err := hashDir(w, childAbs, childRel); err != nil {
-				return err
-			}
-		case info.Mode()&os.ModeSymlink != 0:
-			target, err := os.Readlink(childAbs)
-			if err != nil {
-				return err
-			}
-			if _, err := io.WriteString(w, "symlink\x00"+childRel+"\x00"+target+"\x00"); err != nil {
-				return err
-			}
-		default:
-			if _, err := io.WriteString(w, "file\x00"+childRel+"\x00"); err != nil {
-				return err
-			}
-			data, err := os.ReadFile(childAbs)
-			if err != nil {
-				return err
-			}
-			if _, err := w.Write(data); err != nil {
-				return err
-			}
-			if _, err := io.WriteString(w, "\x00"); err != nil {
-				return err
-			}
-		}
-	}
-
-	return nil
-}
-
-func copyTree(src, dst string) error {
-	info, err := os.Lstat(src)
-	if err != nil {
-		return err
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("%s is not a directory", src)
-	}
-	if err := os.Mkdir(dst, info.Mode().Perm()); err != nil {
-		return err
-	}
-
-	entries, err := os.ReadDir(src)
-	if err != nil {
-		return err
-	}
-
-	for _, entry := range entries {
-		srcPath := filepath.Join(src, entry.Name())
-		dstPath := filepath.Join(dst, entry.Name())
-
-		info, err := os.Lstat(srcPath)
-		if err != nil {
-			return err
-		}
-
-		switch {
-		case info.Mode()&os.ModeSymlink != 0:
-			target, err := os.Readlink(srcPath)
-			if err != nil {
-				return err
-			}
-			if err := os.Symlink(target, dstPath); err != nil {
-				return err
-			}
-		case info.IsDir():
-			if err := copyTree(srcPath, dstPath); err != nil {
-				return err
-			}
-			if err := os.Chmod(dstPath, info.Mode().Perm()); err != nil {
-				return err
-			}
-		default:
-			if err := copyFile(srcPath, dstPath, info.Mode().Perm()); err != nil {
-				return err
-			}
-		}
-	}
-
-	return os.Chmod(dst, info.Mode().Perm())
-}
-
-func copyFile(src, dst string, perm os.FileMode) (err error) {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, perm)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		closeErr := out.Close()
-		if err == nil {
-			err = closeErr
-		}
-	}()
-
-	if _, err := io.Copy(out, in); err != nil {
-		return err
-	}
-	return nil
+	return fsutil.HashDir(root)
 }
 
 func runGit(dir string, args ...string) error {

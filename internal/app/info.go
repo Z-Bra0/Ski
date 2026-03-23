@@ -1,9 +1,7 @@
 package app
 
 import (
-	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/Z-Bra0/Ski/internal/manifest"
@@ -12,10 +10,9 @@ import (
 
 // TargetLinkInfo describes one target directory entry for a skill.
 type TargetLinkInfo struct {
-	Name        string
-	Path        string
-	Status      string
-	CurrentPath string
+	Name   string
+	Path   string
+	Status string
 }
 
 // DetailedSkillInfo reports the resolved state for one declared skill.
@@ -31,7 +28,7 @@ type DetailedSkillInfo struct {
 	Targets       []TargetLinkInfo
 }
 
-// Info returns detailed manifest, lockfile, store, and target-link state for one skill.
+// Info returns detailed manifest, lockfile, store, and target-install state for one skill.
 func (s Service) Info(name string) (DetailedSkillInfo, error) {
 	doc, lf, err := s.loadProjectState()
 	if err != nil {
@@ -100,40 +97,33 @@ func (s Service) inspectTargetLink(targetName, skillName, expectedStorePath, sto
 		Name: targetName,
 		Path: linkPath,
 	}
+	inspection, err := s.inspectTarget(targetName, skillName, expectedStorePath)
+	if err != nil {
+		return TargetLinkInfo{}, err
+	}
+	info.Path = inspection.Path
 
-	entry, err := os.Lstat(linkPath)
-	switch {
-	case errors.Is(err, os.ErrNotExist):
-		if storeError != "" {
-			info.Status = "store unavailable"
-		} else if expectedStorePath == "" {
-			info.Status = "not linked"
-		} else {
-			info.Status = "missing"
+	if storeError != "" {
+		switch inspection.Status {
+		case targetStatusMissing:
+			info.Status = targetStatusStoreUnavailable
+		default:
+			info.Status = targetStatusStoreUnavailable
 		}
 		return info, nil
-	case err != nil:
-		return TargetLinkInfo{}, fmt.Errorf("lstat %s: %w", linkPath, err)
-	case entry.Mode()&os.ModeSymlink == 0:
-		info.Status = "not a symlink"
-		return info, nil
 	}
 
-	currentPath, err := os.Readlink(linkPath)
-	if err != nil {
-		return TargetLinkInfo{}, fmt.Errorf("readlink %s: %w", linkPath, err)
-	}
-	info.CurrentPath = currentPath
-
-	switch {
-	case storeError != "":
-		info.Status = "store unavailable"
-	case expectedStorePath == "":
-		info.Status = "linked"
-	case currentPath == expectedStorePath:
-		info.Status = "linked"
+	switch inspection.Status {
+	case targetStatusInstalled:
+		info.Status = targetStatusInstalled
+	case targetStatusMissing:
+		info.Status = targetStatusMissing
+	case targetStatusLegacySymlink:
+		info.Status = targetStatusLegacySymlink
+	case targetStatusDrifted:
+		info.Status = targetStatusDrifted
 	default:
-		info.Status = "drifted"
+		info.Status = targetStatusUnexpectedEntry
 	}
 
 	return info, nil

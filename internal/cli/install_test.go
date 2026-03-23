@@ -52,10 +52,10 @@ func TestInstallFromLockfile(t *testing.T) {
 		t.Fatalf("add Execute() error = %v", err)
 	}
 
-	// Remove symlinks to simulate a fresh clone
+	// Remove installed targets to simulate a fresh clone
 	linkPath := filepath.Join(projectDir, ".claude", "skills", "repo-map")
-	if err := os.Remove(linkPath); err != nil {
-		t.Fatalf("Remove(symlink) error = %v", err)
+	if err := os.RemoveAll(linkPath); err != nil {
+		t.Fatalf("RemoveAll(target) error = %v", err)
 	}
 
 	// Now run ski install
@@ -71,15 +71,9 @@ func TestInstallFromLockfile(t *testing.T) {
 		t.Fatalf("install Execute() error = %v", err)
 	}
 
-	// Symlink should be restored
+	// Installed target should be restored
 	storePath := filepath.Join(homeDir, ".ski", "store", "git", "repo-map", commit)
-	targetPath, err := os.Readlink(linkPath)
-	if err != nil {
-		t.Fatalf("Readlink() error = %v", err)
-	}
-	if targetPath != storePath {
-		t.Fatalf("symlink target = %q, want %q", targetPath, storePath)
-	}
+	assertInstalledSkillMatchesStore(t, linkPath, storePath)
 
 	if got := stdout.String(); !strings.Contains(got, "installed 1 skills") {
 		t.Fatalf("stdout = %q, want installed confirmation", got)
@@ -211,18 +205,12 @@ func TestInstallUsesPerSkillTargetOverrides(t *testing.T) {
 	}
 
 	codexLink := filepath.Join(projectDir, ".codex", "skills", "repo-map")
-	targetPath, err := os.Readlink(codexLink)
-	if err != nil {
-		t.Fatalf("Readlink(codex) error = %v", err)
-	}
 	wantStore := filepath.Join(homeDir, ".ski", "store", "git", "repo-map", commit)
-	if targetPath != wantStore {
-		t.Fatalf("codex symlink target = %q, want %q", targetPath, wantStore)
-	}
+	assertInstalledSkillMatchesStore(t, codexLink, wantStore)
 
 	claudeLink := filepath.Join(projectDir, ".claude", "skills", "repo-map")
 	if _, err := os.Lstat(claudeLink); !os.IsNotExist(err) {
-		t.Fatalf("claude link exists = %v, want missing", err)
+		t.Fatalf("claude target exists = %v, want missing", err)
 	}
 
 	lf, err := lockfile.ReadFile(filepath.Join(projectDir, lockfile.FileName))
@@ -285,18 +273,12 @@ func TestInstallRemovesStaleTargetsFromPreviousLockState(t *testing.T) {
 	}
 
 	claudeLink := filepath.Join(projectDir, ".claude", "skills", "repo-map")
-	targetPath, err := os.Readlink(claudeLink)
-	if err != nil {
-		t.Fatalf("Readlink(claude) error = %v", err)
-	}
 	wantStore := filepath.Join(homeDir, ".ski", "store", "git", "repo-map", commit)
-	if targetPath != wantStore {
-		t.Fatalf("claude symlink target = %q, want %q", targetPath, wantStore)
-	}
+	assertInstalledSkillMatchesStore(t, claudeLink, wantStore)
 
 	codexLink := filepath.Join(projectDir, ".codex", "skills", "repo-map")
 	if _, err := os.Lstat(codexLink); !os.IsNotExist(err) {
-		t.Fatalf("stale codex link exists = %v, want missing", err)
+		t.Fatalf("stale codex target exists = %v, want missing", err)
 	}
 
 	lf, err := lockfile.ReadFile(filepath.Join(projectDir, lockfile.FileName))
@@ -341,14 +323,8 @@ func TestInstallSupportsCustomTargetFolder(t *testing.T) {
 	}
 
 	linkPath := filepath.Join(projectDir, filepath.Clean("./agent-skills/claude"), "repo-map")
-	targetPath, err := os.Readlink(linkPath)
-	if err != nil {
-		t.Fatalf("Readlink() error = %v", err)
-	}
 	wantStore := filepath.Join(homeDir, ".ski", "store", "git", "repo-map", commit)
-	if targetPath != wantStore {
-		t.Fatalf("symlink target = %q, want %q", targetPath, wantStore)
-	}
+	assertInstalledSkillMatchesStore(t, linkPath, wantStore)
 
 	lf, err := lockfile.ReadFile(filepath.Join(projectDir, lockfile.FileName))
 	if err != nil {
@@ -359,7 +335,7 @@ func TestInstallSupportsCustomTargetFolder(t *testing.T) {
 	}
 }
 
-func TestInstallGlobalRestoresHomeSymlink(t *testing.T) {
+func TestInstallGlobalRestoresHomeTarget(t *testing.T) {
 	t.Parallel()
 
 	repoPath, commit := createGitRepo(t, "repo-map", "repo-map")
@@ -390,8 +366,8 @@ func TestInstallGlobalRestoresHomeSymlink(t *testing.T) {
 	}
 
 	linkPath := filepath.Join(homeDir, ".claude", "skills", "repo-map")
-	if err := os.Remove(linkPath); err != nil {
-		t.Fatalf("Remove(symlink) error = %v", err)
+	if err := os.RemoveAll(linkPath); err != nil {
+		t.Fatalf("RemoveAll(target) error = %v", err)
 	}
 
 	var stdout bytes.Buffer
@@ -406,14 +382,8 @@ func TestInstallGlobalRestoresHomeSymlink(t *testing.T) {
 		t.Fatalf("install Execute() error = %v", err)
 	}
 
-	targetPath, err := os.Readlink(linkPath)
-	if err != nil {
-		t.Fatalf("Readlink() error = %v", err)
-	}
 	wantStore := filepath.Join(homeDir, ".ski", "store", "git", "repo-map", commit)
-	if targetPath != wantStore {
-		t.Fatalf("symlink target = %q, want %q", targetPath, wantStore)
-	}
+	assertInstalledSkillMatchesStore(t, linkPath, wantStore)
 	if got := stdout.String(); !strings.Contains(got, "installed 1 skills") {
 		t.Fatalf("stdout = %q, want installed confirmation", got)
 	}
@@ -489,14 +459,8 @@ func TestInstallSupportsAliasName(t *testing.T) {
 	}
 
 	linkPath := filepath.Join(projectDir, ".claude", "skills", "custom-name")
-	targetPath, err := os.Readlink(linkPath)
-	if err != nil {
-		t.Fatalf("Readlink() error = %v", err)
-	}
 	wantStore := filepath.Join(homeDir, ".ski", "store", "git", "repo-map", commit)
-	if targetPath != wantStore {
-		t.Fatalf("symlink target = %q, want %q", targetPath, wantStore)
-	}
+	assertInstalledSkillMatchesStore(t, linkPath, wantStore)
 
 	lf, err := lockfile.ReadFile(filepath.Join(projectDir, lockfile.FileName))
 	if err != nil {
@@ -544,13 +508,7 @@ func TestInstallRestoresMultiSkillSelectors(t *testing.T) {
 		"beta-skill":  filepath.Join(homeDir, ".ski", "store", "git", "skill-pack", commit, "skills", "beta-skill"),
 	} {
 		linkPath := filepath.Join(projectDir, ".claude", "skills", name)
-		targetPath, err := os.Readlink(linkPath)
-		if err != nil {
-			t.Fatalf("Readlink(%s) error = %v", name, err)
-		}
-		if targetPath != wantTarget {
-			t.Fatalf("symlink target for %s = %q, want %q", name, targetPath, wantTarget)
-		}
+		assertInstalledSkillMatchesStore(t, linkPath, wantTarget)
 	}
 
 	lf, err := lockfile.ReadFile(filepath.Join(projectDir, lockfile.FileName))

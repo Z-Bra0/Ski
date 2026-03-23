@@ -18,7 +18,7 @@
 - TOML for config (ski.toml), JSON for lockfile (ski.lock.json)
 - Adapter pattern: new sources/targets = new adapter, no core changes
 - Keep one copy per skill in store, identified by commit SHA
-- Symlinks from agent dirs into store, never copies
+- Copied skill directories in agent dirs, sourced from store; never raw symlinks
 
 ## Boundaries
 

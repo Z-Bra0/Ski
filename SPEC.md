@@ -12,7 +12,7 @@ my-skill/
   tools/             # optional
 ```
 
-`ski` uses two validation layers before it writes `ski.lock.json` or links the skill:
+`ski` uses two validation layers before it writes `ski.lock.json` or installs the skill into a target:
 
 - compatibility validation hard-fails the operation
 - strict Agent Skills spec validation is non-fatal; `ski add` currently surfaces those mismatches as warnings
@@ -65,7 +65,7 @@ The skill `name` in `ski.toml` defaults to the discovered skill `name` from `SKI
 |---------|------|---------|
 | `git` | selected skill `name` from `SKILL.md` | `source = "git:https://x.com/org/skill-pack.git"` and `upstream_skill = "repo-map"` → `repo-map` |
 
-For a single selected skill, `ski add --name <alias>` overrides the local project name written to `ski.toml` and used for target symlinks. The `source` field still points at the discovered upstream skill name.
+For a single selected skill, `ski add --name <alias>` overrides the local project name written to `ski.toml` and used for the installed target directory name. The `source` field still points at the discovered upstream skill name.
 
 If the local name collides with an existing skill, `ski add` errors and asks the user to set a different `name`.
 
@@ -79,9 +79,9 @@ If the local name collides with an existing skill, `ski add` errors and asks the
 
 | Adapter | Store key | Example path |
 |---------|-----------|--------------|
-| `git` | last URL segment | `git/my-skill/ef5678/` |
+| `git` | remote host + repo path namespace (single-segment paths keep legacy repo-only key) | `git/github.com-acme-my-skill/ef5678/` |
 
-For multi-skill repositories, the stored commit directory is the full repository snapshot with `.git/` removed. Agent symlinks point to the selected skill directory inside that snapshot.
+For multi-skill repositories, the stored commit directory is the full repository snapshot with `.git/` removed. Target installs are copied from the selected skill directory inside that snapshot.
 
 ---
 
@@ -90,6 +90,8 @@ For multi-skill repositories, the stored commit directory is the full repository
 Project-local manifest. Committed with the repository.
 
 `ski init` creates this file with `version = 1`. If no targets are selected or passed, it starts with `targets = []`.
+
+`ski` validates the active-scope manifest before running command-specific work. Invalid target names, duplicate targets, and multiple targets that resolve to the same directory are rejected at manifest load time.
 
 ```toml
 version = 1
@@ -187,9 +189,11 @@ Creates the active-scope manifest if it does not already exist:
 
 If `--target` flags are provided, `ski init` writes them into the new manifest.
 
-If no `--target` flags are provided and `ski init` is running on a TTY, it prompts for:
+If no `--target` flags are provided and `ski init` is running on a TTY, it prompts for built-in targets such as:
 
-- built-in targets such as `claude` and `codex`
+- `cursor`, `claude`, `copilot`, `codex`
+- `windsurf`, `gemini`, `antigravity`, `opencode`
+- `openclaw`, `goose`, and `agents`
 
 Custom target directories are not prompted for during `ski init`. Add them later by editing the manifest manually, or pass them explicitly with `--target dir:<path>`.
 
@@ -223,13 +227,13 @@ upstream_skill = "repo-map"
 
 If `--target` is not provided, `ski add` uses the active manifest's top-level `targets`.
 
-Older manifests and lockfiles may still encode the selected upstream skill in `source` using the legacy `##skill-name` form; both formats are read during migration. `ski add` fetches into `~/.ski/store/`, links to the effective targets for each added skill, and writes the active lockfile. Same as `npm install <pkg>`.
+Older manifests and lockfiles may still encode the selected upstream skill in `source` using the legacy `##skill-name` form; both formats are read during migration. `ski add` fetches into `~/.ski/store/`, installs copied target directories for each added skill, and writes the active lockfile. Same as `npm install <pkg>`.
 
 ### `ski install`
 
-Reads the active manifest and lockfile. Fetches any missing skills into the store by commit SHA. Verifies integrity. Links to the active-scope targets.
+Reads the active manifest and lockfile. Fetches any missing skills into the store by commit SHA. Verifies integrity. Installs copied target directories into the active-scope targets.
 
-If the active lockfile does not exist yet, `ski install` resolves the manifest entries, creates the lockfile, and links the resulting skills.
+If the active lockfile does not exist yet, `ski install` resolves the manifest entries, creates the lockfile, and installs the resulting skills.
 
 ### `ski list`
 
@@ -239,11 +243,11 @@ Lists the skills declared in the active scope, including canonical source, upstr
 
 ### `ski info <skill>`
 
-Shows detailed state for one declared skill in the active scope, including canonical source, upstream skill, informational version, locked commit, integrity, resolved store path, and per-target link status.
+Shows detailed state for one declared skill in the active scope, including canonical source, upstream skill, informational version, locked commit, integrity, resolved store path, and per-target install status.
 
 ### `ski doctor`
 
-Checks the active scope for broken symlinks and inconsistencies between the manifest, lockfile, store, and target directories.
+Checks the active scope for drifted, missing, legacy-symlink, and otherwise inconsistent target installs alongside manifest, lockfile, and store state.
 
 ### `ski update`
 
@@ -255,9 +259,9 @@ No args: updates all skills to latest commit, rewrites lockfile.
 
 ### `ski remove <skill>`
 
-Removes from the active manifest, removes from the active lockfile, and unlinks from all active-scope targets.
+Removes from the active manifest, removes from the active lockfile, and deletes installed target directories from all active-scope targets.
 
-If `--target <name>` is provided, `ski remove` unlinks only those targets from the selected skill and updates that skill's manifest and lockfile targets instead of deleting the skill entry entirely.
+If `--target <name>` is provided, `ski remove` deletes only those installed targets from the selected skill and updates that skill's manifest and lockfile targets instead of deleting the skill entry entirely.
 
 If removing the requested targets leaves the skill with no effective targets, `ski remove --target ...` removes the skill entry entirely.
 
@@ -306,17 +310,31 @@ Global scope uses the same `targets` field but resolves it against the global sc
 
 | Adapter | Project-local skill directory |
 |---------|------------------------------|
+| `copilot` | `./.github/skills/` |
+| `windsurf` | `./.windsurf/skills/` |
+| `gemini` | `./.gemini/skills/` |
+| `antigravity` | `./.agent/skills/` |
 | `claude` | `./.claude/skills/` |
 | `codex` | `./.codex/skills/` |
 | `cursor` | `./.cursor/skills/` |
 | `openclaw` | `./.openclaw/skills/` |
+| `opencode` | `./.opencode/skills/` |
+| `goose` | `./.goose/skills/` |
+| `agents` | `./.agents/skills/` |
 
 | Adapter | Global skill directory |
 |---------|------------------------|
+| `copilot` | `~/.github/skills/` |
+| `windsurf` | `~/.codeium/windsurf/skills/` |
+| `gemini` | `~/.gemini/skills/` |
+| `antigravity` | `~/.gemini/antigravity/skills/` |
 | `claude` | `~/.claude/skills/` |
 | `codex` | `~/.codex/skills/` |
 | `cursor` | `~/.cursor/skills/` |
 | `openclaw` | `~/.openclaw/skills/` |
+| `opencode` | `~/.config/opencode/skills/` |
+| `goose` | `~/.config/goose/skills/` |
+| `agents` | `~/.config/agents/skills/` |
 
 ---
 

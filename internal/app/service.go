@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/Z-Bra0/Ski/internal/fsutil"
 	"github.com/Z-Bra0/Ski/internal/lockfile"
 	"github.com/Z-Bra0/Ski/internal/manifest"
 	"github.com/Z-Bra0/Ski/internal/source"
@@ -22,8 +23,9 @@ type Service struct {
 	Global     bool
 
 	// Test hooks — nil in production; set in tests to inject failures.
-	linkAllFn   func(targets []string, name, storePath string) error
-	unlinkAllFn func(targets []string, name string) error
+	materializeAllFn func(targets []string, name, storePath string) error
+	removeAllFn      func(targets []string, name string) error
+	replaceTargetFn  func(target, name, storePath string) error
 }
 
 // MultiSkillSelectionError reports that a repository contains multiple skills and
@@ -36,24 +38,58 @@ func (e MultiSkillSelectionError) Error() string {
 	return fmt.Sprintf("multiple skills found in repository: %s", strings.Join(e.Skills, ", "))
 }
 
-func (s Service) linkAll(targets []string, name, storePath string) error {
-	if s.linkAllFn != nil {
-		return s.linkAllFn(targets, name, storePath)
+func (s Service) materializeAll(targets []string, name, storePath string) error {
+	if s.materializeAllFn != nil {
+		return s.materializeAllFn(targets, name, storePath)
 	}
 	if s.Global {
-		return target.LinkAllGlobal(s.HomeDir, targets, name, storePath)
+		return target.MaterializeAllGlobal(s.HomeDir, targets, name, storePath)
 	}
-	return target.LinkAll(s.ProjectDir, targets, name, storePath)
+	return target.MaterializeAll(s.ProjectDir, targets, name, storePath)
 }
 
-func (s Service) unlinkAll(targets []string, name string) error {
-	if s.unlinkAllFn != nil {
-		return s.unlinkAllFn(targets, name)
+func (s Service) removeAll(targets []string, name string) error {
+	if s.removeAllFn != nil {
+		return s.removeAllFn(targets, name)
 	}
 	if s.Global {
-		return target.UnlinkAllGlobal(s.HomeDir, targets, name)
+		return target.RemoveAllGlobal(s.HomeDir, targets, name)
 	}
-	return target.UnlinkAll(s.ProjectDir, targets, name)
+	return target.RemoveAll(s.ProjectDir, targets, name)
+}
+
+func (s Service) backupTarget(targetName, skillName string) (string, error) {
+	dir, err := s.skillDir(targetName)
+	if err != nil {
+		return "", err
+	}
+	entryPath := filepath.Join(dir, skillName)
+	if _, err := os.Lstat(entryPath); errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	} else if err != nil {
+		return "", fmt.Errorf("lstat %s: %w", entryPath, err)
+	}
+	backupPath, err := os.MkdirTemp(dir, "."+skillName+"-txbackup-")
+	if err != nil {
+		return "", fmt.Errorf("create backup dir for %s: %w", entryPath, err)
+	}
+	if err := os.Remove(backupPath); err != nil {
+		return "", fmt.Errorf("prepare backup path %s: %w", backupPath, err)
+	}
+	if err := fsutil.CopyTree(entryPath, backupPath); err != nil {
+		return "", fmt.Errorf("backup %s: %w", entryPath, err)
+	}
+	return backupPath, nil
+}
+
+func (s Service) replaceTarget(targetName, name, storePath string) error {
+	if s.replaceTargetFn != nil {
+		return s.replaceTargetFn(targetName, name, storePath)
+	}
+	if s.Global {
+		return target.ReplaceGlobal(s.HomeDir, targetName, name, storePath)
+	}
+	return target.Replace(s.ProjectDir, targetName, name, storePath)
 }
 
 func (s Service) manifestPath() string {
@@ -95,6 +131,17 @@ func ensureParentDir(path string) error {
 	return os.MkdirAll(filepath.Dir(path), 0o755)
 }
 
+func (s Service) readManifest(path string) (*manifest.Manifest, error) {
+	doc, err := manifest.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.validateManifestTargets(doc); err != nil {
+		return nil, err
+	}
+	return doc, nil
+}
+
 func (s Service) prepareAddSource(rawSource string) (source.Git, error) {
 	return source.ParseGit(rawSource)
 }
@@ -128,6 +175,9 @@ func (s Service) InitWithTargets(targets []string) (string, error) {
 
 	doc := manifest.Default()
 	doc.Targets = append([]string(nil), targets...)
+	if err := s.validateManifestTargets(&doc); err != nil {
+		return "", err
+	}
 	if err := ensureParentDir(path); err != nil {
 		return "", fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
 	}
@@ -139,7 +189,7 @@ func (s Service) InitWithTargets(targets []string) (string, error) {
 
 func (s Service) loadProjectState() (*manifest.Manifest, *lockfile.Lockfile, error) {
 	manifestPath := s.manifestPath()
-	doc, err := manifest.ReadFile(manifestPath)
+	doc, err := s.readManifest(manifestPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil, fmt.Errorf("%s not found; %s", manifestPath, s.initHint())
@@ -154,6 +204,46 @@ func (s Service) loadProjectState() (*manifest.Manifest, *lockfile.Lockfile, err
 	}
 
 	return doc, lf, nil
+}
+
+func (s Service) validateManifestTargets(doc *manifest.Manifest) error {
+	if err := s.validateTargetSet(doc.Targets, "manifest targets"); err != nil {
+		return err
+	}
+	for _, skill := range doc.Skills {
+		if err := s.validateTargetSet(skill.Targets, fmt.Sprintf("skill %q targets", skill.Name)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s Service) validateTargetSet(targets []string, context string) error {
+	seenNames := make(map[string]struct{}, len(targets))
+	seenDirs := make(map[string]string, len(targets))
+	for _, rawTarget := range targets {
+		targetName := strings.TrimSpace(rawTarget)
+		if targetName == "" {
+			return fmt.Errorf("%s: target names must not be empty", context)
+		}
+		if targetName != rawTarget {
+			return fmt.Errorf("%s: target %q must not include leading or trailing whitespace", context, rawTarget)
+		}
+		if _, ok := seenNames[targetName]; ok {
+			return fmt.Errorf("%s: duplicate target %q", context, targetName)
+		}
+		seenNames[targetName] = struct{}{}
+
+		dir, err := s.skillDir(targetName)
+		if err != nil {
+			return fmt.Errorf("%s: %w", context, err)
+		}
+		if previous, ok := seenDirs[dir]; ok {
+			return fmt.Errorf("%s: targets %q and %q resolve to the same directory %s", context, previous, targetName, dir)
+		}
+		seenDirs[dir] = targetName
+	}
+	return nil
 }
 
 func findSkill(skills []manifest.Skill, match func(manifest.Skill) bool) (manifest.Skill, bool) {

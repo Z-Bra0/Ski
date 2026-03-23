@@ -53,11 +53,7 @@ func newInfoCmd(opts Options) *cobra.Command {
 			}
 			fmt.Fprintf(out, "targets: %s\n", strings.Join(targetNames(info.Targets), ", "))
 			for _, target := range info.Targets {
-				fmt.Fprintf(out, "target %s: %s (%s)", target.Name, target.Status, target.Path)
-				if target.CurrentPath != "" && (info.StorePath == "" || target.CurrentPath != info.StorePath) {
-					fmt.Fprintf(out, " -> %s", target.CurrentPath)
-				}
-				fmt.Fprintln(out)
+				fmt.Fprintf(out, "target %s: %s (%s)\n", target.Name, target.Status, target.Path)
 			}
 			return nil
 		},

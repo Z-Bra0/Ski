@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"slices"
 
 	"github.com/Z-Bra0/Ski/internal/lockfile"
@@ -27,7 +26,7 @@ func (f DoctorFinding) String() string {
 }
 
 // Doctor checks for active-scope inconsistencies across the manifest,
-// lockfile, store, and linked target directories.
+// lockfile, store, and installed target directories.
 func (s Service) Doctor() ([]DoctorFinding, error) {
 	doc, lf, err := s.loadProjectState()
 	if err != nil {
@@ -163,62 +162,50 @@ func (s Service) doctorSkillFindings(doc *manifest.Manifest, skill manifest.Skil
 }
 
 func (s Service) doctorTargetFindings(skillName, targetName, storePath string, shouldExist bool) []DoctorFinding {
-	dir, err := s.skillDir(targetName)
+	inspection, err := s.inspectTarget(targetName, skillName, storePath)
 	if err != nil {
 		return []DoctorFinding{{
 			Skill:   skillName,
 			Message: err.Error(),
 		}}
 	}
-
-	linkPath := filepath.Join(dir, skillName)
-	info, err := os.Lstat(linkPath)
-	switch {
-	case errors.Is(err, os.ErrNotExist):
+	switch inspection.Status {
+	case targetStatusMissing:
 		if !shouldExist {
 			return nil
 		}
 		return []DoctorFinding{{
 			Skill:   skillName,
-			Message: fmt.Sprintf("missing %s symlink at %s", targetName, linkPath),
+			Message: fmt.Sprintf("missing %s target at %s", targetName, inspection.Path),
 		}}
-	case err != nil:
+	case targetStatusInstalled:
+		if shouldExist {
+			return nil
+		}
 		return []DoctorFinding{{
 			Skill:   skillName,
-			Message: fmt.Sprintf("lstat %s: %v", linkPath, err),
+			Message: fmt.Sprintf("unexpected %s target at %s", targetName, inspection.Path),
 		}}
-	case info.Mode()&os.ModeSymlink == 0:
+	case targetStatusLegacySymlink:
+		return []DoctorFinding{{
+			Skill:   skillName,
+			Message: legacySymlinkInstallError(inspection.Path).Error(),
+		}}
+	case targetStatusDrifted:
+		return []DoctorFinding{{
+			Skill:   skillName,
+			Message: driftedTargetError(inspection.Path).Error(),
+		}}
+	default:
 		if !shouldExist {
 			return []DoctorFinding{{
 				Skill:   skillName,
-				Message: fmt.Sprintf("unexpected %s entry at %s is not a symlink", targetName, linkPath),
+				Message: fmt.Sprintf("unexpected %s entry at %s", targetName, inspection.Path),
 			}}
 		}
 		return []DoctorFinding{{
 			Skill:   skillName,
-			Message: fmt.Sprintf("%s is not a symlink", linkPath),
+			Message: fmt.Sprintf("%s is not a managed skill directory", inspection.Path),
 		}}
 	}
-
-	current, err := os.Readlink(linkPath)
-	if err != nil {
-		return []DoctorFinding{{
-			Skill:   skillName,
-			Message: fmt.Sprintf("readlink %s: %v", linkPath, err),
-		}}
-	}
-	if !shouldExist {
-		return []DoctorFinding{{
-			Skill:   skillName,
-			Message: fmt.Sprintf("unexpected %s symlink at %s points to %s", targetName, linkPath, current),
-		}}
-	}
-	if current != storePath {
-		return []DoctorFinding{{
-			Skill:   skillName,
-			Message: fmt.Sprintf("%s symlink points to %s, want %s", targetName, current, storePath),
-		}}
-	}
-
-	return nil
 }

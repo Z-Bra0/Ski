@@ -129,7 +129,7 @@ func TestDoctorSupportsCustomTargetFolder(t *testing.T) {
 	}
 }
 
-func TestDoctorReportsIntegrityAndSymlinkProblems(t *testing.T) {
+func TestDoctorReportsIntegrityAndDriftProblems(t *testing.T) {
 	t.Parallel()
 
 	repoPath, commit := createGitRepo(t, "repo-map", "repo-map")
@@ -161,11 +161,10 @@ description: tampered
 ---
 `)
 
-	linkPath := filepath.Join(projectDir, ".claude", "skills", "repo-map")
-	if err := os.Remove(linkPath); err != nil {
-		t.Fatalf("Remove(link) error = %v", err)
+	targetPath := filepath.Join(projectDir, ".claude", "skills", "repo-map")
+	if err := os.WriteFile(filepath.Join(targetPath, "notes.txt"), []byte("drifted"), 0o644); err != nil {
+		t.Fatalf("WriteFile(notes.txt) error = %v", err)
 	}
-	makeSymlink(t, linkPath, fakeStorePath(homeDir, "repo-map", "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"))
 
 	var stdout bytes.Buffer
 	doctorCmd := NewRootCmd(Options{
@@ -188,8 +187,8 @@ description: tampered
 	if !strings.Contains(out, "integrity mismatch") {
 		t.Fatalf("stdout = %q, want integrity mismatch", out)
 	}
-	if !strings.Contains(out, "symlink points to") {
-		t.Fatalf("stdout = %q, want symlink mismatch", out)
+	if !strings.Contains(out, "was modified and no longer matches the locked skill contents") {
+		t.Fatalf("stdout = %q, want drift finding", out)
 	}
 }
 
@@ -242,7 +241,7 @@ description: [unterminated
 	}
 }
 
-func TestDoctorReportsStaleSymlinkFromRemovedTarget(t *testing.T) {
+func TestDoctorReportsStaleTargetFromRemovedTarget(t *testing.T) {
 	t.Parallel()
 
 	repoPath, _ := createGitRepo(t, "repo-map", "repo-map")
@@ -305,7 +304,7 @@ func TestDoctorReportsStaleSymlinkFromRemovedTarget(t *testing.T) {
 	if !strings.Contains(out, "lockfile targets [claude codex] do not match manifest targets [claude]") {
 		t.Fatalf("stdout = %q, want target mismatch", out)
 	}
-	if !strings.Contains(out, "unexpected codex symlink") {
-		t.Fatalf("stdout = %q, want stale codex symlink finding", out)
+	if !strings.Contains(out, "unexpected codex target") {
+		t.Fatalf("stdout = %q, want stale codex target finding", out)
 	}
 }

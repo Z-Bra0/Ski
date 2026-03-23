@@ -21,7 +21,7 @@ import (
 
 var repoPathByURL sync.Map
 
-func TestAddFetchesWritesLockfileAndLinksTargets(t *testing.T) {
+func TestAddFetchesWritesLockfileAndInstallsTargets(t *testing.T) {
 	t.Parallel()
 
 	repoPath, commit := createGitRepo(t, "repo-map", "repo-map")
@@ -97,20 +97,14 @@ func TestAddFetchesWritesLockfileAndLinksTargets(t *testing.T) {
 	}
 
 	linkPath := filepath.Join(projectDir, ".claude", "skills", "repo-map")
-	targetPath, err := os.Readlink(linkPath)
-	if err != nil {
-		t.Fatalf("Readlink() error = %v", err)
-	}
-	if targetPath != storePath {
-		t.Fatalf("symlink target = %q, want %q", targetPath, storePath)
-	}
+	assertInstalledSkillMatchesStore(t, linkPath, storePath)
 
 	if got := stdout.String(); !strings.Contains(got, "added repo-map") {
 		t.Fatalf("stdout = %q, want add confirmation", got)
 	}
 }
 
-func TestAddAcceptsExistingMatchingLinkAndFillsMissingTargets(t *testing.T) {
+func TestAddAcceptsExistingMatchingTargetAndFillsMissingTargets(t *testing.T) {
 	t.Parallel()
 
 	repoPath, commit := createGitRepo(t, "repo-map", "repo-map")
@@ -128,12 +122,7 @@ func TestAddAcceptsExistingMatchingLinkAndFillsMissingTargets(t *testing.T) {
 
 	storePath := filepath.Join(homeDir, ".ski", "store", "git", "repo-map", commit)
 	existingLink := filepath.Join(projectDir, ".codex", "skills", "repo-map")
-	if err := os.MkdirAll(filepath.Dir(existingLink), 0o755); err != nil {
-		t.Fatalf("MkdirAll(existing link dir) error = %v", err)
-	}
-	if err := os.Symlink(storePath, existingLink); err != nil {
-		t.Fatalf("Symlink(existing link) error = %v", err)
-	}
+	writeInstalledSkillAndStore(t, existingLink, storePath, "repo-map")
 
 	cmd := NewRootCmd(Options{
 		Getwd:      func() (string, error) { return projectDir, nil },
@@ -170,13 +159,7 @@ func TestAddAcceptsExistingMatchingLinkAndFillsMissingTargets(t *testing.T) {
 		filepath.Join(projectDir, ".claude", "skills", "repo-map"),
 		filepath.Join(projectDir, ".codex", "skills", "repo-map"),
 	} {
-		targetPath, err := os.Readlink(linkPath)
-		if err != nil {
-			t.Fatalf("Readlink(%q) error = %v", linkPath, err)
-		}
-		if targetPath != storePath {
-			t.Fatalf("symlink target for %s = %q, want %q", linkPath, targetPath, storePath)
-		}
+		assertInstalledSkillMatchesStore(t, linkPath, storePath)
 	}
 }
 
@@ -228,14 +211,8 @@ func TestAddSupportsNameOverride(t *testing.T) {
 	}
 
 	linkPath := filepath.Join(projectDir, ".claude", "skills", "custom-name")
-	targetPath, err := os.Readlink(linkPath)
-	if err != nil {
-		t.Fatalf("Readlink() error = %v", err)
-	}
 	wantStore := filepath.Join(homeDir, ".ski", "store", "git", "repo-map", commit)
-	if targetPath != wantStore {
-		t.Fatalf("symlink target = %q, want %q", targetPath, wantStore)
-	}
+	assertInstalledSkillMatchesStore(t, linkPath, wantStore)
 }
 
 func TestAddSupportsTargetOverrideFlag(t *testing.T) {
@@ -299,13 +276,7 @@ func TestAddSupportsTargetOverrideFlag(t *testing.T) {
 
 	storePath := filepath.Join(homeDir, ".ski", "store", "git", "repo-map", commit)
 	codexLink := filepath.Join(projectDir, ".codex", "skills", "repo-map")
-	targetPath, err := os.Readlink(codexLink)
-	if err != nil {
-		t.Fatalf("Readlink(codex) error = %v", err)
-	}
-	if targetPath != storePath {
-		t.Fatalf("codex symlink target = %q, want %q", targetPath, storePath)
-	}
+	assertInstalledSkillMatchesStore(t, codexLink, storePath)
 	if _, err := os.Lstat(filepath.Join(projectDir, ".claude", "skills", "repo-map")); !os.IsNotExist(err) {
 		t.Fatalf("claude link stat error = %v, want not exist", err)
 	}
@@ -414,13 +385,7 @@ func TestAddExtendsTargetsForExistingSkill(t *testing.T) {
 		filepath.Join(projectDir, ".claude", "skills", "repo-map"),
 		filepath.Join(projectDir, ".codex", "skills", "repo-map"),
 	} {
-		targetPath, err := os.Readlink(linkPath)
-		if err != nil {
-			t.Fatalf("Readlink(%q) error = %v", linkPath, err)
-		}
-		if targetPath != storePath {
-			t.Fatalf("symlink target for %s = %q, want %q", linkPath, targetPath, storePath)
-		}
+		assertInstalledSkillMatchesStore(t, linkPath, storePath)
 	}
 	if got := stdout.String(); !strings.Contains(got, "added repo-map") {
 		t.Fatalf("stdout = %q, want add confirmation", got)
@@ -483,13 +448,7 @@ func TestAddTargetOverrideAcceptsSkillReference(t *testing.T) {
 
 	storePath := filepath.Join(homeDir, ".ski", "store", "git", "repo-map", commit)
 	codexLink := filepath.Join(projectDir, ".codex", "skills", "repo-map")
-	targetPath, err := os.Readlink(codexLink)
-	if err != nil {
-		t.Fatalf("Readlink(codex) error = %v", err)
-	}
-	if targetPath != storePath {
-		t.Fatalf("codex symlink target = %q, want %q", targetPath, storePath)
-	}
+	assertInstalledSkillMatchesStore(t, codexLink, storePath)
 }
 
 func TestAddIgnoresUnselectedInvalidSkills(t *testing.T) {
@@ -998,14 +957,8 @@ func TestAddLinksIntoCustomTargetFolder(t *testing.T) {
 	}
 
 	linkPath := filepath.Join(projectDir, filepath.Clean("./agent-skills/claude"), "repo-map")
-	targetPath, err := os.Readlink(linkPath)
-	if err != nil {
-		t.Fatalf("Readlink() error = %v", err)
-	}
 	wantStore := filepath.Join(homeDir, ".ski", "store", "git", "repo-map", commit)
-	if targetPath != wantStore {
-		t.Fatalf("symlink target = %q, want %q", targetPath, wantStore)
-	}
+	assertInstalledSkillMatchesStore(t, linkPath, wantStore)
 }
 
 func TestAddRejectsConflictingTargetOverrideDirs(t *testing.T) {
@@ -1050,7 +1003,7 @@ func TestAddRejectsConflictingTargetOverrideDirs(t *testing.T) {
 	}
 }
 
-func TestAddGlobalWritesGlobalStateAndLinksToHome(t *testing.T) {
+func TestAddGlobalWritesGlobalStateAndInstallsToHome(t *testing.T) {
 	t.Parallel()
 
 	repoPath, commit := createGitRepo(t, "repo-map", "repo-map")
@@ -1098,14 +1051,8 @@ func TestAddGlobalWritesGlobalStateAndLinksToHome(t *testing.T) {
 	}
 
 	linkPath := filepath.Join(homeDir, ".claude", "skills", "repo-map")
-	targetPath, err := os.Readlink(linkPath)
-	if err != nil {
-		t.Fatalf("Readlink() error = %v", err)
-	}
 	wantStore := filepath.Join(homeDir, ".ski", "store", "git", "repo-map", commit)
-	if targetPath != wantStore {
-		t.Fatalf("symlink target = %q, want %q", targetPath, wantStore)
-	}
+	assertInstalledSkillMatchesStore(t, linkPath, wantStore)
 }
 
 func TestAddRejectsLocalFilesystemSource(t *testing.T) {
@@ -1394,13 +1341,7 @@ func TestAddMultiSkillRepoWithSkillFlags(t *testing.T) {
 		"beta-skill":  betaPath,
 	} {
 		linkPath := filepath.Join(projectDir, ".claude", "skills", name)
-		targetPath, err := os.Readlink(linkPath)
-		if err != nil {
-			t.Fatalf("Readlink(%s) error = %v", name, err)
-		}
-		if targetPath != wantTarget {
-			t.Fatalf("symlink target for %s = %q, want %q", name, targetPath, wantTarget)
-		}
+		assertInstalledSkillMatchesStore(t, linkPath, wantTarget)
 	}
 
 	if got := stdout.String(); !strings.Contains(got, "added 2 skills") {
@@ -1687,14 +1628,8 @@ func TestAddMultiSkillRepoPromptsForSelectionOnTTY(t *testing.T) {
 	}
 
 	linkPath := filepath.Join(projectDir, ".claude", "skills", "beta-skill")
-	targetPath, err := os.Readlink(linkPath)
-	if err != nil {
-		t.Fatalf("Readlink() error = %v", err)
-	}
 	wantTarget := filepath.Join(homeDir, ".ski", "store", "git", "skill-pack", commit, "skills", "beta-skill")
-	if targetPath != wantTarget {
-		t.Fatalf("symlink target = %q, want %q", targetPath, wantTarget)
-	}
+	assertInstalledSkillMatchesStore(t, linkPath, wantTarget)
 	if !strings.Contains(stdout.String(), "added beta-skill") {
 		t.Fatalf("stdout = %q, want add confirmation", stdout.String())
 	}
