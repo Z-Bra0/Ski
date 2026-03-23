@@ -21,7 +21,7 @@ Current design decisions and their rationale.
 
 ## Skill Discovery And UX
 
-- `ski add` performs declare + fetch + lock + link — the first add should leave the project ready to use without a separate install step.
+- `ski add` performs declare + fetch + lock + install — the first add should leave the project ready to use without a separate install step.
 - Manifest skill names default from discovered `SKILL.md` metadata — local names stay aligned with the upstream skill contract; `--name` remains available as a local alias for a single selected skill.
 - Multi-skill repositories are selected by discovered skill name — `ski add` scans for `SKILL.md` files up to depth 3, supports explicit `--skill` selection, `--all`, and interactive selection on TTYs.
 - Legacy `##skill` selectors are read-only migration input — the CLI may still accept them on input, but canonical manifests and lockfiles write `source` plus `upstream_skill` instead.
@@ -31,4 +31,5 @@ Current design decisions and their rationale.
 
 - SHA-256 for integrity — the lockfile stores a SHA-256 hash of the full stored repository snapshot, not just the selected subdirectory.
 - `dir:` prefixes custom target folders — built-in target names stay unambiguous while custom destinations remain explicit and scope-aware.
-- Windows support is deferred — the first release targets macOS and Linux and relies on symlink behavior that still needs Windows-specific design work.
+- Target installs are copied from the store — agent tools see ordinary directories in their skill folders, while the shared store still provides caching and integrity checks.
+- Windows support is deferred — the first release still targets macOS and Linux first; cross-platform path and filesystem behavior needs separate validation.
