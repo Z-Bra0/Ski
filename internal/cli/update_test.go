@@ -11,7 +11,7 @@ import (
 	"github.com/Z-Bra0/Ski/internal/manifest"
 )
 
-func TestUpdateAdvancesLockfileAndSymlink(t *testing.T) {
+func TestUpdateAdvancesLockfileAndInstalledTarget(t *testing.T) {
 	t.Parallel()
 
 	repoPath, oldCommit := createGitRepo(t, "repo-map", "repo-map")
@@ -60,14 +60,8 @@ func TestUpdateAdvancesLockfileAndSymlink(t *testing.T) {
 	}
 
 	linkPath := filepath.Join(projectDir, ".claude", "skills", "repo-map")
-	targetPath, err := os.Readlink(linkPath)
-	if err != nil {
-		t.Fatalf("Readlink() error = %v", err)
-	}
 	wantStore := filepath.Join(homeDir, ".ski", "store", "git", "repo-map", newCommit)
-	if targetPath != wantStore {
-		t.Fatalf("symlink target = %q, want %q", targetPath, wantStore)
-	}
+	assertInstalledSkillMatchesStore(t, linkPath, wantStore)
 	if strings.Contains(stdout.String(), oldCommit[:7]) == false || !strings.Contains(stdout.String(), "updated 1 skills") {
 		t.Fatalf("stdout = %q, want update summary", stdout.String())
 	}
@@ -131,7 +125,7 @@ func TestUpdatePreservesInformationalVersionInLockfile(t *testing.T) {
 	}
 }
 
-func TestUpdateGlobalAdvancesHomeLockfileAndSymlink(t *testing.T) {
+func TestUpdateGlobalAdvancesHomeLockfileAndInstalledTarget(t *testing.T) {
 	t.Parallel()
 
 	repoPath, oldCommit := createGitRepo(t, "repo-map", "repo-map")
@@ -184,14 +178,8 @@ func TestUpdateGlobalAdvancesHomeLockfileAndSymlink(t *testing.T) {
 	}
 
 	linkPath := filepath.Join(homeDir, ".claude", "skills", "repo-map")
-	targetPath, err := os.Readlink(linkPath)
-	if err != nil {
-		t.Fatalf("Readlink() error = %v", err)
-	}
 	wantStore := filepath.Join(homeDir, ".ski", "store", "git", "repo-map", newCommit)
-	if targetPath != wantStore {
-		t.Fatalf("symlink target = %q, want %q", targetPath, wantStore)
-	}
+	assertInstalledSkillMatchesStore(t, linkPath, wantStore)
 	if !strings.Contains(stdout.String(), oldCommit[:7]) || !strings.Contains(stdout.String(), "updated 1 skills") {
 		t.Fatalf("stdout = %q, want update summary", stdout.String())
 	}
@@ -246,14 +234,8 @@ func TestUpdateCheckReportsWithoutMutating(t *testing.T) {
 	}
 
 	linkPath := filepath.Join(projectDir, ".claude", "skills", "repo-map")
-	targetPath, err := os.Readlink(linkPath)
-	if err != nil {
-		t.Fatalf("Readlink() error = %v", err)
-	}
 	wantStore := filepath.Join(homeDir, ".ski", "store", "git", "repo-map", oldCommit)
-	if targetPath != wantStore {
-		t.Fatalf("symlink target = %q, want %q", targetPath, wantStore)
-	}
+	assertInstalledSkillMatchesStore(t, linkPath, wantStore)
 	if !strings.Contains(stdout.String(), newCommit[:7]) || !strings.Contains(stdout.String(), "1 skills can be updated") {
 		t.Fatalf("stdout = %q, want check summary", stdout.String())
 	}

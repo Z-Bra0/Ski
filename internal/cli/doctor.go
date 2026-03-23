@@ -9,7 +9,7 @@ import (
 func newDoctorCmd(opts Options) *cobra.Command {
 	return &cobra.Command{
 		Use:   "doctor",
-		Short: "Check for broken links and inconsistencies in the active scope",
+		Short: "Check for target drift and inconsistencies in the active scope",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			svc, err := newService(cmd, opts)

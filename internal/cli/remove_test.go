@@ -10,22 +10,21 @@ import (
 
 	"github.com/Z-Bra0/Ski/internal/lockfile"
 	"github.com/Z-Bra0/Ski/internal/manifest"
+	"github.com/Z-Bra0/Ski/internal/source"
 )
 
-// makeSymlink creates parent dirs and a symlink at linkPath -> target.
-func makeSymlink(t *testing.T, linkPath, target string) {
+func storePathForSource(t *testing.T, homeDir, sourceValue, commit string) string {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(linkPath), 0o755); err != nil {
-		t.Fatalf("MkdirAll(%s) error = %v", filepath.Dir(linkPath), err)
-	}
-	if err := os.Symlink(target, linkPath); err != nil {
-		t.Fatalf("Symlink(%s -> %s) error = %v", linkPath, target, err)
-	}
-}
 
-// fakeStorePath returns a non-existent but syntactically valid store path.
-func fakeStorePath(homeDir, skillName, commit string) string {
-	return filepath.Join(homeDir, ".ski", "store", "git", skillName, commit)
+	spec, err := source.ParseGit(sourceValue)
+	if err != nil {
+		t.Fatalf("ParseGit(%q) error = %v", sourceValue, err)
+	}
+	storeKey, err := spec.DeriveName()
+	if err != nil {
+		t.Fatalf("DeriveName(%q) error = %v", sourceValue, err)
+	}
+	return filepath.Join(homeDir, ".ski", "store", "git", storeKey, commit)
 }
 
 func removeCmd(t *testing.T, projectDir, homeDir string, args ...string) error {
@@ -60,14 +59,14 @@ func writeFakeLockfile(t *testing.T, projectDir, name, source, commit string, ta
 	}
 }
 
-func TestRemoveDeletesSymlinkAndMetadata(t *testing.T) {
+func TestRemoveDeletesInstalledTargetAndMetadata(t *testing.T) {
 	t.Parallel()
 
 	repoPath, _ := createGitRepo(t, "repo-map", "repo-map")
 	projectDir := t.TempDir()
 	homeDir := t.TempDir()
 
-	// Add the skill so the store, symlink, manifest, and lockfile are all real.
+	// Add the skill so the store, installed target, manifest, and lockfile are all real.
 	addCmd := NewRootCmd(Options{
 		Getwd:      func() (string, error) { return projectDir, nil },
 		GetHomeDir: func() (string, error) { return homeDir, nil },
@@ -88,7 +87,7 @@ func TestRemoveDeletesSymlinkAndMetadata(t *testing.T) {
 
 	linkPath := filepath.Join(projectDir, ".claude", "skills", "repo-map")
 	if _, err := os.Lstat(linkPath); err != nil {
-		t.Fatalf("symlink missing before remove: %v", err)
+		t.Fatalf("target missing before remove: %v", err)
 	}
 
 	var stdout bytes.Buffer
@@ -103,9 +102,9 @@ func TestRemoveDeletesSymlinkAndMetadata(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	// Symlink must be gone.
+	// Installed target must be gone.
 	if _, err := os.Lstat(linkPath); !os.IsNotExist(err) {
-		t.Fatalf("symlink still exists after remove")
+		t.Fatalf("target still exists after remove")
 	}
 
 	// Manifest must be empty.
@@ -191,20 +190,20 @@ func TestRemoveWithPerSkillTargetOverride(t *testing.T) {
 	}
 	writeFakeLockfile(t, projectDir, skillName, source, commit, []string{"codex"})
 
-	// Place the symlink where the skill-level target says it should be.
+	storePath := storePathForSource(t, homeDir, source, commit)
 	codexLink := filepath.Join(projectDir, ".codex", "skills", skillName)
-	makeSymlink(t, codexLink, fakeStorePath(homeDir, skillName, commit))
+	writeInstalledSkillAndStore(t, codexLink, storePath, skillName)
 
 	if err := removeCmd(t, projectDir, homeDir, skillName); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	// Per-skill target symlink must be gone.
+	// Per-skill target must be gone.
 	if _, err := os.Lstat(codexLink); !os.IsNotExist(err) {
-		t.Fatalf("codex symlink still exists after remove")
+		t.Fatalf("codex target still exists after remove")
 	}
 
-	// Global target symlink was never created, so there is nothing to assert
+	// Global target was never created, so there is nothing to assert
 	// about it — but the remove must not have errored.
 }
 
@@ -288,10 +287,10 @@ func TestRemoveTargetFlagKeepsSkillInRemainingTargets(t *testing.T) {
 	}
 
 	if _, err := os.Lstat(filepath.Join(projectDir, ".codex", "skills", "repo-map")); !os.IsNotExist(err) {
-		t.Fatalf("codex symlink still exists after targeted remove")
+		t.Fatalf("codex target still exists after targeted remove")
 	}
 	if _, err := os.Lstat(filepath.Join(projectDir, ".claude", "skills", "repo-map")); err != nil {
-		t.Fatalf("claude symlink missing after targeted remove: %v", err)
+		t.Fatalf("claude target missing after targeted remove: %v", err)
 	}
 	if got := stdout.String(); !strings.Contains(got, `removed skill "repo-map" from targets: codex`) {
 		t.Fatalf("stdout = %q, want targeted remove confirmation", got)
@@ -359,11 +358,11 @@ func TestRemoveCleansStaleTargetsFromLockfile(t *testing.T) {
 	}
 	writeFakeLockfile(t, projectDir, skillName, source, commit, []string{"codex"})
 
-	storePath := fakeStorePath(homeDir, skillName, commit)
+	storePath := storePathForSource(t, homeDir, source, commit)
 	claudeLink := filepath.Join(projectDir, ".claude", "skills", skillName)
 	codexLink := filepath.Join(projectDir, ".codex", "skills", skillName)
-	makeSymlink(t, claudeLink, storePath)
-	makeSymlink(t, codexLink, storePath)
+	writeInstalledSkillAndStore(t, claudeLink, storePath, skillName)
+	writeSimpleSkillDir(t, codexLink, skillName)
 
 	if err := removeCmd(t, projectDir, homeDir, skillName); err != nil {
 		t.Fatalf("Execute() error = %v", err)
@@ -371,14 +370,14 @@ func TestRemoveCleansStaleTargetsFromLockfile(t *testing.T) {
 
 	// Both the current manifest target and the stale lock target must be gone.
 	if _, err := os.Lstat(claudeLink); !os.IsNotExist(err) {
-		t.Fatalf("claude symlink still exists after remove")
+		t.Fatalf("claude target still exists after remove")
 	}
 	if _, err := os.Lstat(codexLink); !os.IsNotExist(err) {
-		t.Fatalf("stale codex symlink still exists after remove")
+		t.Fatalf("stale codex target still exists after remove")
 	}
 }
 
-func TestRemoveDeletesCustomTargetSymlink(t *testing.T) {
+func TestRemoveDeletesCustomTargetDirectory(t *testing.T) {
 	t.Parallel()
 
 	projectDir := t.TempDir()
@@ -402,18 +401,19 @@ func TestRemoveDeletesCustomTargetSymlink(t *testing.T) {
 	writeFakeLockfile(t, projectDir, skillName, source, commit, []string{customTarget})
 
 	linkPath := filepath.Join(projectDir, filepath.Clean("./agent-skills/claude"), skillName)
-	makeSymlink(t, linkPath, fakeStorePath(homeDir, skillName, commit))
+	storePath := storePathForSource(t, homeDir, source, commit)
+	writeInstalledSkillAndStore(t, linkPath, storePath, skillName)
 
 	if err := removeCmd(t, projectDir, homeDir, skillName); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
 	if _, err := os.Lstat(linkPath); !os.IsNotExist(err) {
-		t.Fatalf("custom target symlink still exists after remove")
+		t.Fatalf("custom target still exists after remove")
 	}
 }
 
-func TestRemoveGlobalDeletesHomeSymlinkAndMetadata(t *testing.T) {
+func TestRemoveGlobalDeletesHomeTargetAndMetadata(t *testing.T) {
 	t.Parallel()
 
 	repoPath, _ := createGitRepo(t, "repo-map", "repo-map")
@@ -455,7 +455,7 @@ func TestRemoveGlobalDeletesHomeSymlinkAndMetadata(t *testing.T) {
 	}
 
 	if _, err := os.Lstat(filepath.Join(homeDir, ".claude", "skills", "repo-map")); !os.IsNotExist(err) {
-		t.Fatalf("global claude symlink still exists after remove")
+		t.Fatalf("global claude target still exists after remove")
 	}
 
 	doc, err := manifest.ReadFile(globalManifestPath)

@@ -51,7 +51,7 @@ func TestInfoShowsDetailedSkillState(t *testing.T) {
 	assertContains(t, out, "integrity: sha256:")
 	assertContains(t, out, "store path: "+filepath.Join(homeDir, ".ski", "store", "git", "repo-map", commit))
 	assertContains(t, out, "targets: claude")
-	assertContains(t, out, "target claude: linked")
+	assertContains(t, out, "target claude: installed")
 }
 
 func TestInfoAcceptsSkillReference(t *testing.T) {
@@ -107,11 +107,10 @@ func TestInfoReportsDriftedTarget(t *testing.T) {
 		},
 	})
 
-	linkPath := filepath.Join(projectDir, ".claude", "skills", "repo-map")
-	if err := os.Remove(linkPath); err != nil {
-		t.Fatalf("Remove(link) error = %v", err)
+	targetPath := filepath.Join(projectDir, ".claude", "skills", "repo-map")
+	if err := os.WriteFile(filepath.Join(targetPath, "notes.txt"), []byte("drifted"), 0o644); err != nil {
+		t.Fatalf("WriteFile(notes.txt) error = %v", err)
 	}
-	makeSymlink(t, linkPath, fakeStorePath(homeDir, "repo-map", "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"))
 
 	var stdout bytes.Buffer
 	infoCmd := NewRootCmd(Options{
@@ -127,7 +126,7 @@ func TestInfoReportsDriftedTarget(t *testing.T) {
 
 	out := stdout.String()
 	assertContains(t, out, "target claude: drifted")
-	assertContains(t, out, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	assertContains(t, out, filepath.Join(projectDir, ".claude", "skills", "repo-map"))
 }
 
 func TestInfoErrorsForUnknownSkill(t *testing.T) {

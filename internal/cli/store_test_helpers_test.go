@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/Z-Bra0/Ski/internal/fsutil"
 	"github.com/Z-Bra0/Ski/internal/manifest"
 )
 
@@ -36,4 +37,49 @@ func overwriteStoredSkillFile(t testing.TB, homeDir, storeKey, commit, relativeP
 		t.Fatalf("WriteFile(%s) error = %v", relativePath, err)
 	}
 	return path
+}
+
+func assertInstalledSkillMatchesStore(t testing.TB, installedPath, storePath string) {
+	t.Helper()
+
+	info, err := os.Stat(installedPath)
+	if err != nil {
+		t.Fatalf("Stat(%s) error = %v", installedPath, err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("%s is not a directory", installedPath)
+	}
+	if _, err := os.Stat(filepath.Join(installedPath, "SKILL.md")); err != nil {
+		t.Fatalf("Stat(%s/SKILL.md) error = %v", installedPath, err)
+	}
+
+	gotHash, err := fsutil.HashDir(installedPath)
+	if err != nil {
+		t.Fatalf("HashDir(%s) error = %v", installedPath, err)
+	}
+	wantHash, err := fsutil.HashDir(storePath)
+	if err != nil {
+		t.Fatalf("HashDir(%s) error = %v", storePath, err)
+	}
+	if gotHash != wantHash {
+		t.Fatalf("installed dir hash = %q, want %q", gotHash, wantHash)
+	}
+}
+
+func writeSimpleSkillDir(t testing.TB, dir, name string) {
+	t.Helper()
+
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%s) error = %v", dir, err)
+	}
+	content := "---\nname: " + name + "\ndescription: test skill\n---\n"
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile(%s/SKILL.md) error = %v", dir, err)
+	}
+}
+
+func writeInstalledSkillAndStore(t testing.TB, targetPath, storePath, name string) {
+	t.Helper()
+	writeSimpleSkillDir(t, storePath, name)
+	writeSimpleSkillDir(t, targetPath, name)
 }
