@@ -4,13 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/Z-Bra0/Ski/internal/lockfile"
 	"github.com/Z-Bra0/Ski/internal/manifest"
+	"github.com/Z-Bra0/Ski/internal/store"
 )
 
-// Remove deletes a skill from the active manifest, lockfile, and target symlinks.
+// Remove deletes a skill from the active manifest, lockfile, and target installs.
 // When targetOverride is non-empty, it removes only those targets from the skill.
 // The store cache entry is left intact for potential reuse.
 func (s Service) Remove(name string, targetOverride []string) error {
@@ -50,22 +50,38 @@ func (s Service) Remove(name string, targetOverride []string) error {
 		effectiveTargets = intersectStrings(effectiveTargets, targetOverride)
 	}
 
-	changes, err := s.planRemoveTargetChanges(effectiveTargets, name)
+	previousStorePath := ""
+	if lockEntry, ok := findLockSkill(lf.Skills, name); ok {
+		src, err := s.loadSkillSourceForScope(lockEntry.Source, lockEntry.UpstreamSkill)
+		if err != nil {
+			return err
+		}
+		src.Ref = lockEntry.Commit
+		stored, err := store.FindGit(s.HomeDir, src, lockEntry.Commit, name)
+		if err != nil {
+			return err
+		}
+		previousStorePath = stored.Path
+	}
+
+	changes, err := s.planRemoveTargetChanges(effectiveTargets, name, previousStorePath)
 	if err != nil {
-		return fmt.Errorf("remove symlinks: %w", err)
+		return fmt.Errorf("remove targets: %w", err)
 	}
 
 	applied := make([]updateTargetChange, 0, len(changes))
-	for _, change := range changes {
-		if err := s.applyUpdateTargetChange(name, change); err != nil {
-			rollbackApplied := append(append([]updateTargetChange(nil), applied...), change)
+	for i := range changes {
+		backupPath, err := s.applyUpdateTargetChange(name, changes[i])
+		if err != nil {
+			rollbackApplied := append(append([]updateTargetChange(nil), applied...), changes[i])
 			rollbackErr := s.rollbackRemove(name, rollbackApplied, manifestPath, originalManifestData, lockPath, originalLockData, hadLockfile)
 			if rollbackErr != nil {
-				return fmt.Errorf("remove symlinks: %w (rollback failed: %v)", err, rollbackErr)
+				return fmt.Errorf("remove targets: %w (rollback failed: %v)", err, rollbackErr)
 			}
-			return fmt.Errorf("remove symlinks: %w", err)
+			return fmt.Errorf("remove targets: %w", err)
 		}
-		applied = append(applied, change)
+		changes[i].BackupPath = backupPath
+		applied = append(applied, changes[i])
 	}
 
 	currentTargets := effectiveTargetsForSkill(doc, ms)
@@ -110,29 +126,42 @@ func (s Service) Remove(name string, targetOverride []string) error {
 		return fmt.Errorf("write %s: %w", lockPath, err)
 	}
 
+	cleanupRemoveBackups(applied)
 	return nil
 }
 
-func (s Service) planRemoveTargetChanges(targets []string, name string) ([]updateTargetChange, error) {
+func (s Service) planRemoveTargetChanges(targets []string, name, previousStorePath string) ([]updateTargetChange, error) {
 	changes := make([]updateTargetChange, 0, len(targets))
 	for _, targetName := range targets {
-		dir, err := s.skillDir(targetName)
+		inspection, err := s.inspectTarget(targetName, name, previousStorePath)
 		if err != nil {
 			return nil, err
 		}
-
-		linkPath := filepath.Join(dir, name)
-		previousPath, err := readExistingSymlink(linkPath)
-		if err != nil {
-			return nil, err
-		}
-		if previousPath == "" {
+		switch inspection.Status {
+		case targetStatusMissing:
 			continue
+		case targetStatusInstalled:
+			if previousStorePath == "" {
+				// No lockfile entry — allow removal without drift verification.
+				// The caller backs up the target before applying this change so
+				// that rollback can restore it if a later step fails.
+				changes = append(changes, updateTargetChange{
+					Target:      targetName,
+					ForceRemove: true,
+				})
+				continue
+			}
+		case targetStatusLegacySymlink:
+			return nil, legacySymlinkInstallError(inspection.Path)
+		case targetStatusDrifted:
+			return nil, driftedTargetError(inspection.Path)
+		case targetStatusUnexpectedEntry:
+			return nil, unexpectedTargetEntryError(inspection.Path)
 		}
 
 		changes = append(changes, updateTargetChange{
 			Target:       targetName,
-			PreviousPath: previousPath,
+			PreviousPath: previousStorePath,
 		})
 	}
 
@@ -143,15 +172,28 @@ func (s Service) rollbackRemove(name string, applied []updateTargetChange, manif
 	var rollbackErr error
 	for i := len(applied) - 1; i >= 0; i-- {
 		change := applied[i]
-		if change.PreviousPath == "" {
+		restorePath := change.PreviousPath
+		if restorePath == "" {
+			restorePath = change.BackupPath
+		}
+		if restorePath == "" {
 			continue
 		}
-		if err := s.linkAll([]string{change.Target}, name, change.PreviousPath); err != nil {
+		if err := s.materializeAll([]string{change.Target}, name, restorePath); err != nil {
 			rollbackErr = errors.Join(rollbackErr, err)
 		}
 	}
+	cleanupRemoveBackups(applied)
 	if err := restoreProjectFiles(manifestPath, manifestData, lockPath, lockData, hadLockfile); err != nil {
 		rollbackErr = errors.Join(rollbackErr, err)
 	}
 	return rollbackErr
+}
+
+func cleanupRemoveBackups(changes []updateTargetChange) {
+	for _, change := range changes {
+		if change.BackupPath != "" {
+			os.RemoveAll(change.BackupPath)
+		}
+	}
 }

@@ -18,7 +18,7 @@ type plannedAdd struct {
 	StorePath string
 }
 
-// Add parses a git source, fetches it into the store, links to targets,
+// Add parses a git source, fetches it into the store, installs targets,
 // and writes both the manifest and lockfile.
 // Returns the skill names that were added.
 func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOverride string, addAll bool, targetOverride []string) ([]string, []skill.ValidationWarning, error) {
@@ -134,7 +134,8 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 			}
 			warnings = append(warnings, skillWarnings...)
 
-			if err := s.preflightAddLinks(mergedTargets, localName, stored.Path); err != nil {
+			installTargets, err := s.preflightAddTargets(targetsToLink, localName, stored.Path)
+			if err != nil {
 				return nil, nil, err
 			}
 
@@ -150,7 +151,7 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 
 			planned = append(planned, plannedAdd{
 				Name:      localName,
-				Targets:   append([]string(nil), targetsToLink...),
+				Targets:   append([]string(nil), installTargets...),
 				StorePath: stored.Path,
 			})
 			added = append(added, localName)
@@ -168,7 +169,8 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 		}
 		warnings = append(warnings, skillWarnings...)
 
-		if err := s.preflightAddLinks(effectiveTargets, localName, stored.Path); err != nil {
+		installTargets, err := s.preflightAddTargets(effectiveTargets, localName, stored.Path)
+		if err != nil {
 			return nil, nil, err
 		}
 
@@ -192,7 +194,7 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 
 		planned = append(planned, plannedAdd{
 			Name:      localName,
-			Targets:   append([]string(nil), effectiveTargets...),
+			Targets:   append([]string(nil), installTargets...),
 			StorePath: stored.Path,
 		})
 		added = append(added, localName)
@@ -281,42 +283,40 @@ func findSkillByIdentity(skills []manifest.Skill, sourceValue, upstreamSkill str
 	return manifest.Skill{}, false, nil
 }
 
-func (s Service) preflightAddLinks(targets []string, name, storePath string) error {
+func (s Service) preflightAddTargets(targets []string, name, storePath string) ([]string, error) {
 	seen := make(map[string]string, len(targets))
+	installTargets := make([]string, 0, len(targets))
 	for _, targetName := range targets {
 		dir, err := s.skillDir(targetName)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if previous, ok := seen[dir]; ok {
-			return fmt.Errorf("targets %q and %q resolve to the same directory %s", previous, targetName, dir)
+			return nil, fmt.Errorf("targets %q and %q resolve to the same directory %s", previous, targetName, dir)
 		}
 		seen[dir] = targetName
-		linkPath := filepath.Join(dir, name)
-		info, err := os.Lstat(linkPath)
-		if err == nil {
-			if info.Mode()&os.ModeSymlink == 0 {
-				return fmt.Errorf("%s already exists and is not a symlink", linkPath)
-			}
-			current, err := os.Readlink(linkPath)
-			if err != nil {
-				return fmt.Errorf("readlink %s: %w", linkPath, err)
-			}
-			// Treat an existing matching link as already reconciled so add can
-			// fill in the remaining targets and persist manifest/lock state.
-			if current == storePath {
-				continue
-			}
-			return fmt.Errorf("%s already links to %s", linkPath, current)
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("lstat %s: %w", linkPath, err)
+		inspection, err := s.inspectTarget(targetName, name, storePath)
+		if err != nil {
+			return nil, err
+		}
+		switch inspection.Status {
+		case targetStatusMissing:
+			installTargets = append(installTargets, targetName)
+		case targetStatusInstalled:
+			continue
+		case targetStatusLegacySymlink:
+			return nil, legacySymlinkInstallError(inspection.Path)
+		case targetStatusDrifted:
+			return nil, driftedTargetError(inspection.Path)
+		default:
+			return nil, unexpectedTargetEntryError(inspection.Path)
 		}
 	}
-	return nil
+	return installTargets, nil
 }
 
 // commitAddPlans writes the updated lockfile and manifest to disk, then
-// creates symlinks for each planned skill. On any failure it rolls back all
+// materializes copied skill folders for each planned skill. On any failure it rolls back all
 // on-disk changes made during this call.
 func (s Service) commitAddPlans(
 	planned []plannedAdd,
@@ -348,24 +348,24 @@ func (s Service) commitAddPlans(
 		return fmt.Errorf("write %s: %w", manifestPath, err)
 	}
 
-	linked := make([]plannedAdd, 0, len(planned))
+	applied := make([]plannedAdd, 0, len(planned))
 	for _, plan := range planned {
-		if err := s.linkAll(plan.Targets, plan.Name, plan.StorePath); err != nil {
-			rollbackErr := s.rollbackAddSelected(linked, manifestPath, originalManifestData, lockPath, originalLockData, hadLockfile)
+		if err := s.materializeAll(plan.Targets, plan.Name, plan.StorePath); err != nil {
+			rollbackErr := s.rollbackAddSelected(applied, manifestPath, originalManifestData, lockPath, originalLockData, hadLockfile)
 			if rollbackErr != nil {
 				return fmt.Errorf("%w (rollback failed: %v)", err, rollbackErr)
 			}
 			return err
 		}
-		linked = append(linked, plan)
+		applied = append(applied, plan)
 	}
 	return nil
 }
 
-func (s Service) rollbackAddSelected(linked []plannedAdd, manifestPath string, manifestData []byte, lockPath string, lockData []byte, hadLockfile bool) error {
+func (s Service) rollbackAddSelected(applied []plannedAdd, manifestPath string, manifestData []byte, lockPath string, lockData []byte, hadLockfile bool) error {
 	var rollbackErr error
-	for i := len(linked) - 1; i >= 0; i-- {
-		if err := s.unlinkAll(linked[i].Targets, linked[i].Name); err != nil {
+	for i := len(applied) - 1; i >= 0; i-- {
+		if err := s.removeAll(applied[i].Targets, applied[i].Name); err != nil {
 			rollbackErr = errors.Join(rollbackErr, err)
 		}
 	}

@@ -16,7 +16,7 @@ type plannedInstall struct {
 }
 
 // Install reads the active manifest and lockfile, fetches all skills into the
-// store, verifies integrity, and links them to configured targets.
+// store, verifies integrity, and installs them to configured targets.
 // Returns the number of skills processed.
 func (s Service) Install() (int, error) {
 	manifestPath := s.manifestPath()
@@ -62,10 +62,13 @@ func (s Service) Install() (int, error) {
 		}
 
 		effectiveTargets := effectiveTargetsForSkill(doc, mSkill)
-		if _, err := s.preflightInstallLinks(effectiveTargets, mSkill.Name, stored.Path); err != nil {
-			return 0, fmt.Errorf("skill %q: %w", mSkill.Name, err)
+		previousTargets := []string(nil)
+		previousPath := ""
+		if hasLock {
+			previousTargets = append(previousTargets, lockedEntry.Targets...)
+			previousPath = stored.Path
 		}
-		changes, err := s.planUpdateTargetChanges(mSkill, effectiveTargets, lockedEntry, hasLock, stored.Path)
+		changes, err := s.planUpdateTargetChanges(mSkill.Name, effectiveTargets, previousTargets, previousPath, stored.Path)
 		if err != nil {
 			return 0, fmt.Errorf("skill %q: %w", mSkill.Name, err)
 		}
@@ -95,12 +98,13 @@ func (s Service) Install() (int, error) {
 		return 0, fmt.Errorf("write %s: %w", lockPath, err)
 	}
 
-	linked := make([]plannedInstall, 0, len(plans))
+	applied := make([]plannedInstall, 0, len(plans))
 	for _, plan := range plans {
 		appliedCount := 0
-		for _, change := range plan.Changes {
-			if err := s.applyUpdateTargetChange(plan.Name, change); err != nil {
-				rollbackPlans := append([]plannedInstall(nil), linked...)
+		for i := range plan.Changes {
+			backupPath, err := s.applyUpdateTargetChange(plan.Name, plan.Changes[i])
+			if err != nil {
+				rollbackPlans := append([]plannedInstall(nil), applied...)
 				if appliedCount > 0 {
 					rollbackPlans = append(rollbackPlans, plannedInstall{
 						Name:    plan.Name,
@@ -113,74 +117,43 @@ func (s Service) Install() (int, error) {
 				}
 				return 0, fmt.Errorf("skill %q: %w", plan.Name, err)
 			}
+			plan.Changes[i].BackupPath = backupPath
 			appliedCount++
 		}
 		plan.Changes = plan.Changes[:appliedCount]
-		linked = append(linked, plan)
+		applied = append(applied, plan)
 	}
 
+	cleanupInstallBackups(applied)
 	return len(plans), nil
 }
 
-func (s Service) preflightInstallLinks(targets []string, name, storePath string) ([]string, error) {
-	seen := make(map[string]string, len(targets))
-	targetsToCreate := make([]string, 0, len(targets))
-	for _, targetName := range targets {
-		dir, err := s.skillDir(targetName)
-		if err != nil {
-			return nil, err
-		}
-		if previous, ok := seen[dir]; ok {
-			return nil, fmt.Errorf("targets %q and %q resolve to the same directory %s", previous, targetName, dir)
-		}
-		seen[dir] = targetName
-
-		linkPath := filepath.Join(dir, name)
-		info, err := os.Lstat(linkPath)
-		if err == nil {
-			if info.Mode()&os.ModeSymlink == 0 {
-				return nil, fmt.Errorf("%s already exists and is not a symlink", linkPath)
-			}
-			current, err := os.Readlink(linkPath)
-			if err != nil {
-				return nil, fmt.Errorf("readlink %s: %w", linkPath, err)
-			}
-			if current != storePath {
-				return nil, fmt.Errorf("%s already links to %s", linkPath, current)
-			}
-			continue
-		}
-		if !errors.Is(err, os.ErrNotExist) {
-			return nil, fmt.Errorf("lstat %s: %w", linkPath, err)
-		}
-		targetsToCreate = append(targetsToCreate, targetName)
-	}
-	return targetsToCreate, nil
-}
-
-func (s Service) rollbackInstall(linked []plannedInstall, lockPath string, lockData []byte, hadLockfile bool) error {
+func (s Service) rollbackInstall(applied []plannedInstall, lockPath string, lockData []byte, hadLockfile bool) error {
 	var rollbackErr error
-	for i := len(linked) - 1; i >= 0; i-- {
-		for j := len(linked[i].Changes) - 1; j >= 0; j-- {
-			change := linked[i].Changes[j]
-			if change.PreviousPath == change.DesiredPath {
+	for i := len(applied) - 1; i >= 0; i-- {
+		for j := len(applied[i].Changes) - 1; j >= 0; j-- {
+			change := applied[i].Changes[j]
+			if change.PreviousPath == change.DesiredPath && change.BackupPath == "" {
 				continue
 			}
-			if change.DesiredPath != "" {
-				if err := s.unlinkAll([]string{change.Target}, linked[i].Name); err != nil {
-					rollbackErr = errors.Join(rollbackErr, err)
-					continue
-				}
-			}
-			if change.PreviousPath != "" {
-				if err := s.linkAll([]string{change.Target}, linked[i].Name, change.PreviousPath); err != nil {
-					rollbackErr = errors.Join(rollbackErr, err)
-				}
+			if _, err := s.applyUpdateTargetChange(applied[i].Name, reverseUpdateTargetChange(change)); err != nil {
+				rollbackErr = errors.Join(rollbackErr, err)
 			}
 		}
 	}
+	cleanupInstallBackups(applied)
 	if err := restoreLockfile(lockPath, lockData, hadLockfile); err != nil {
 		rollbackErr = errors.Join(rollbackErr, err)
 	}
 	return rollbackErr
+}
+
+func cleanupInstallBackups(plans []plannedInstall) {
+	for _, plan := range plans {
+		for _, change := range plan.Changes {
+			if change.BackupPath != "" {
+				os.RemoveAll(change.BackupPath)
+			}
+		}
+	}
 }

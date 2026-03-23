@@ -172,15 +172,15 @@ func TestCommitAddPlansLinksAllPlans(t *testing.T) {
 		{Name: "alpha-skill", Targets: []string{"claude"}, StorePath: storePath},
 	}
 
-	linked := make([]string, 0)
+	applied := make([]string, 0)
 	svc := Service{
 		ProjectDir: projectDir,
 		HomeDir:    homeDir,
-		linkAllFn: func(targets []string, name, sp string) error {
-			linked = append(linked, name)
+		materializeAllFn: func(targets []string, name, sp string) error {
+			applied = append(applied, name)
 			return nil
 		},
-		unlinkAllFn: func(targets []string, name string) error { return nil },
+		removeAllFn: func(targets []string, name string) error { return nil },
 	}
 
 	err := svc.commitAddPlans(
@@ -193,8 +193,8 @@ func TestCommitAddPlansLinksAllPlans(t *testing.T) {
 	if err != nil {
 		t.Fatalf("commitAddPlans() error = %v, want nil", err)
 	}
-	if len(linked) != 1 || linked[0] != "alpha-skill" {
-		t.Fatalf("linked = %v, want [alpha-skill]", linked)
+	if len(applied) != 1 || applied[0] != "alpha-skill" {
+		t.Fatalf("applied = %v, want [alpha-skill]", applied)
 	}
 }
 
@@ -213,19 +213,19 @@ func TestCommitAddPlansRollsBackOnLinkFailure(t *testing.T) {
 	}
 
 	callCount := 0
-	unlinked := make([]string, 0)
+	removed := make([]string, 0)
 	svc := Service{
 		ProjectDir: projectDir,
 		HomeDir:    homeDir,
-		linkAllFn: func(targets []string, name, sp string) error {
+		materializeAllFn: func(targets []string, name, sp string) error {
 			callCount++
 			if callCount == 2 {
 				return fmt.Errorf("forced link failure for %s", name)
 			}
 			return nil
 		},
-		unlinkAllFn: func(targets []string, name string) error {
-			unlinked = append(unlinked, name)
+		removeAllFn: func(targets []string, name string) error {
+			removed = append(removed, name)
 			return nil
 		},
 	}
@@ -243,8 +243,8 @@ func TestCommitAddPlansRollsBackOnLinkFailure(t *testing.T) {
 	if !strings.Contains(err.Error(), "forced link failure for beta-skill") {
 		t.Fatalf("commitAddPlans() error = %v, want mention of beta-skill", err)
 	}
-	if len(unlinked) != 1 || unlinked[0] != "alpha-skill" {
-		t.Fatalf("unlinked = %v, want [alpha-skill] rolled back", unlinked)
+	if len(removed) != 1 || removed[0] != "alpha-skill" {
+		t.Fatalf("removed = %v, want [alpha-skill] rolled back", removed)
 	}
 	// manifest and lockfile must be restored
 	doc, readErr := manifest.ReadFile(manifestPath)
@@ -308,10 +308,10 @@ func TestCommitAddPlansRestoresLockfileWhenManifestWriteFails(t *testing.T) {
 	}
 
 	svc := Service{
-		ProjectDir:  lockDir,
-		HomeDir:     homeDir,
-		linkAllFn:   func(targets []string, name, sp string) error { return nil },
-		unlinkAllFn: func(targets []string, name string) error { return nil },
+		ProjectDir:       lockDir,
+		HomeDir:          homeDir,
+		materializeAllFn: func(targets []string, name, sp string) error { return nil },
+		removeAllFn:      func(targets []string, name string) error { return nil },
 	}
 
 	err := svc.commitAddPlans(

@@ -9,7 +9,6 @@ import (
 	"github.com/Z-Bra0/Ski/internal/target"
 )
 
-// claudeLink returns the expected symlink path for the "claude" target.
 func claudeLink(projectRoot, name string) string {
 	return filepath.Join(projectRoot, ".claude", "skills", name)
 }
@@ -78,52 +77,37 @@ func TestBuiltInTargetDirs(t *testing.T) {
 	}
 }
 
-// TestLinkCreatesSymlink verifies that Link creates the target directory and
-// a symlink pointing at storePath.
-func TestLinkCreatesSymlink(t *testing.T) {
+func TestMaterializeCreatesInstalledCopy(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	store := filepath.Join(t.TempDir(), "my-skill")
+	store := writeStoreSkill(t, t.TempDir(), "my-skill", "alpha")
 
-	if err := target.Link(root, "claude", "my-skill", store); err != nil {
-		t.Fatalf("Link() error = %v", err)
+	if err := target.Materialize(root, "claude", "my-skill", store); err != nil {
+		t.Fatalf("Materialize() error = %v", err)
 	}
 
-	got, err := os.Readlink(claudeLink(root, "my-skill"))
-	if err != nil {
-		t.Fatalf("Readlink() error = %v", err)
-	}
-	if got != store {
-		t.Fatalf("symlink target = %q, want %q", got, store)
-	}
+	assertInstalledSkill(t, claudeLink(root, "my-skill"), "alpha")
 }
 
-func TestLinkSupportsCustomRelativeTarget(t *testing.T) {
+func TestMaterializeSupportsCustomRelativeTarget(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	store := filepath.Join(t.TempDir(), "my-skill")
-	targetDir := "dir:./agent-skills/claude"
+	store := writeStoreSkill(t, t.TempDir(), "my-skill", "alpha")
 
-	if err := target.Link(root, targetDir, "my-skill", store); err != nil {
-		t.Fatalf("Link() error = %v", err)
+	if err := target.Materialize(root, "dir:./agent-skills/claude", "my-skill", store); err != nil {
+		t.Fatalf("Materialize() error = %v", err)
 	}
 
-	got, err := os.Readlink(customLink(root, filepath.Clean("./agent-skills/claude"), "my-skill"))
-	if err != nil {
-		t.Fatalf("Readlink() error = %v", err)
-	}
-	if got != store {
-		t.Fatalf("symlink target = %q, want %q", got, store)
-	}
+	assertInstalledSkill(t, customLink(root, filepath.Clean("./agent-skills/claude"), "my-skill"), "alpha")
 }
 
-func TestLinkSupportsCustomTargetViaInScopeSymlink(t *testing.T) {
+func TestMaterializeSupportsCustomTargetViaInScopeSymlink(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	store := filepath.Join(t.TempDir(), "my-skill")
+	store := writeStoreSkill(t, t.TempDir(), "my-skill", "alpha")
 	if err := os.MkdirAll(filepath.Join(root, "managed"), 0o755); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
@@ -131,58 +115,33 @@ func TestLinkSupportsCustomTargetViaInScopeSymlink(t *testing.T) {
 		t.Fatalf("Symlink() error = %v", err)
 	}
 
-	if err := target.Link(root, "dir:linked/skills", "my-skill", store); err != nil {
-		t.Fatalf("Link() error = %v", err)
+	if err := target.Materialize(root, "dir:linked/skills", "my-skill", store); err != nil {
+		t.Fatalf("Materialize() error = %v", err)
 	}
 
-	got, err := os.Readlink(filepath.Join(root, "managed", "skills", "my-skill"))
-	if err != nil {
-		t.Fatalf("Readlink() error = %v", err)
-	}
-	if got != store {
-		t.Fatalf("symlink target = %q, want %q", got, store)
-	}
+	assertInstalledSkill(t, filepath.Join(root, "managed", "skills", "my-skill"), "alpha")
 }
 
-// TestLinkIsIdempotent verifies that calling Link twice with the same arguments
-// succeeds without error.
-func TestLinkIsIdempotent(t *testing.T) {
+func TestMaterializeRejectsExistingInstalledDirectory(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	store := filepath.Join(t.TempDir(), "my-skill")
+	store1 := writeStoreSkill(t, t.TempDir(), "my-skill", "alpha")
+	store2 := writeStoreSkill(t, t.TempDir(), "my-skill", "beta")
 
-	for i := range 2 {
-		if err := target.Link(root, "claude", "my-skill", store); err != nil {
-			t.Fatalf("Link() #%d error = %v", i+1, err)
-		}
+	if err := target.Materialize(root, "claude", "my-skill", store1); err != nil {
+		t.Fatalf("Materialize(store1) error = %v", err)
 	}
-}
-
-// TestLinkRejectsConflictingSymlink verifies that Link errors when the link
-// already points somewhere else.
-func TestLinkRejectsConflictingSymlink(t *testing.T) {
-	t.Parallel()
-
-	root := t.TempDir()
-	store1 := filepath.Join(t.TempDir(), "v1")
-	store2 := filepath.Join(t.TempDir(), "v2")
-
-	if err := target.Link(root, "claude", "my-skill", store1); err != nil {
-		t.Fatalf("Link(store1) error = %v", err)
-	}
-	err := target.Link(root, "claude", "my-skill", store2)
+	err := target.Materialize(root, "claude", "my-skill", store2)
 	if err == nil {
-		t.Fatal("Link(store2) error = nil, want conflict error")
+		t.Fatal("Materialize(store2) error = nil, want conflict error")
 	}
-	if !strings.Contains(err.Error(), "already links to") {
-		t.Fatalf("Link() error = %v, want 'already links to'", err)
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("Materialize() error = %v, want existing-directory error", err)
 	}
 }
 
-// TestLinkRejectsNonSymlink verifies that Link errors when a regular file
-// already occupies the link path.
-func TestLinkRejectsNonSymlink(t *testing.T) {
+func TestMaterializeRejectsNonDirectory(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -190,98 +149,117 @@ func TestLinkRejectsNonSymlink(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
-	// Place a regular file where the symlink should go.
 	if err := os.WriteFile(filepath.Join(dir, "my-skill"), []byte("x"), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	err := target.Link(root, "claude", "my-skill", "/some/store")
+	err := target.Materialize(root, "claude", "my-skill", writeStoreSkill(t, t.TempDir(), "my-skill", "alpha"))
 	if err == nil {
-		t.Fatal("Link() error = nil, want not-a-symlink error")
+		t.Fatal("Materialize() error = nil, want non-directory error")
 	}
-	if !strings.Contains(err.Error(), "not a symlink") {
-		t.Fatalf("Link() error = %v, want 'not a symlink'", err)
+	if !strings.Contains(err.Error(), "not a directory") {
+		t.Fatalf("Materialize() error = %v, want non-directory error", err)
 	}
 }
 
-// TestLinkRejectsUnsupportedTarget verifies that Link errors on unknown targets.
-func TestLinkRejectsUnsupportedTarget(t *testing.T) {
+func TestMaterializeRejectsLegacySymlink(t *testing.T) {
 	t.Parallel()
 
-	err := target.Link(t.TempDir(), "unknown-agent", "my-skill", "/store")
+	root := t.TempDir()
+	dir := filepath.Join(root, ".claude", "skills")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.Symlink("/tmp/old-skill", filepath.Join(dir, "my-skill")); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
+	}
+
+	err := target.Materialize(root, "claude", "my-skill", writeStoreSkill(t, t.TempDir(), "my-skill", "alpha"))
 	if err == nil {
-		t.Fatal("Link() error = nil, want unsupported target error")
+		t.Fatal("Materialize() error = nil, want legacy symlink error")
+	}
+	if !strings.Contains(err.Error(), "legacy symlink install") {
+		t.Fatalf("Materialize() error = %v, want legacy symlink error", err)
+	}
+}
+
+func TestMaterializeRejectsUnsupportedTarget(t *testing.T) {
+	t.Parallel()
+
+	err := target.Materialize(t.TempDir(), "unknown-agent", "my-skill", writeStoreSkill(t, t.TempDir(), "my-skill", "alpha"))
+	if err == nil {
+		t.Fatal("Materialize() error = nil, want unsupported target error")
 	}
 	if !strings.Contains(err.Error(), "unsupported target") {
-		t.Fatalf("Link() error = %v, want 'unsupported target'", err)
+		t.Fatalf("Materialize() error = %v, want 'unsupported target'", err)
 	}
 }
 
-func TestLinkRejectsAbsoluteCustomTarget(t *testing.T) {
+func TestMaterializeRejectsAbsoluteCustomTarget(t *testing.T) {
 	t.Parallel()
 
-	err := target.Link(t.TempDir(), "dir:/tmp/agent-skills", "my-skill", "/store")
+	err := target.Materialize(t.TempDir(), "dir:/tmp/agent-skills", "my-skill", writeStoreSkill(t, t.TempDir(), "my-skill", "alpha"))
 	if err == nil {
-		t.Fatal("Link() error = nil, want project-relative error")
+		t.Fatal("Materialize() error = nil, want project-relative error")
 	}
 	if !strings.Contains(err.Error(), "project-relative") {
-		t.Fatalf("Link() error = %v, want project-relative error", err)
+		t.Fatalf("Materialize() error = %v, want project-relative error", err)
 	}
 }
 
-func TestLinkRejectsParentEscapingCustomTarget(t *testing.T) {
+func TestMaterializeRejectsParentEscapingCustomTarget(t *testing.T) {
 	t.Parallel()
 
-	err := target.Link(t.TempDir(), "dir:../agent-skills", "my-skill", "/store")
+	err := target.Materialize(t.TempDir(), "dir:../agent-skills", "my-skill", writeStoreSkill(t, t.TempDir(), "my-skill", "alpha"))
 	if err == nil {
-		t.Fatal("Link() error = nil, want project-root error")
+		t.Fatal("Materialize() error = nil, want project-root error")
 	}
 	if !strings.Contains(err.Error(), "within the project root") {
-		t.Fatalf("Link() error = %v, want project-root error", err)
+		t.Fatalf("Materialize() error = %v, want project-root error", err)
 	}
 }
 
-func TestLinkRejectsProjectRootCustomTarget(t *testing.T) {
+func TestMaterializeRejectsProjectRootCustomTarget(t *testing.T) {
 	t.Parallel()
 
 	for _, customTarget := range []string{"dir:.", "dir:./"} {
-		err := target.Link(t.TempDir(), customTarget, "my-skill", "/store")
+		err := target.Materialize(t.TempDir(), customTarget, "my-skill", writeStoreSkill(t, t.TempDir(), "my-skill", "alpha"))
 		if err == nil {
-			t.Fatalf("Link(%q) error = nil, want project-root error", customTarget)
+			t.Fatalf("Materialize(%q) error = nil, want project-root error", customTarget)
 		}
 		if !strings.Contains(err.Error(), "would install skills into the project root") {
-			t.Fatalf("Link(%q) error = %v, want explicit project-root error", customTarget, err)
+			t.Fatalf("Materialize(%q) error = %v, want explicit project-root error", customTarget, err)
 		}
 	}
 }
 
-func TestLinkGlobalRejectsHomeRootCustomTarget(t *testing.T) {
+func TestMaterializeGlobalRejectsHomeRootCustomTarget(t *testing.T) {
 	t.Parallel()
 
 	for _, customTarget := range []string{"dir:.", "dir:./"} {
-		err := target.LinkGlobal(t.TempDir(), customTarget, "my-skill", "/store")
+		err := target.MaterializeGlobal(t.TempDir(), customTarget, "my-skill", writeStoreSkill(t, t.TempDir(), "my-skill", "alpha"))
 		if err == nil {
-			t.Fatalf("LinkGlobal(%q) error = nil, want home-root error", customTarget)
+			t.Fatalf("MaterializeGlobal(%q) error = nil, want home-root error", customTarget)
 		}
 		if !strings.Contains(err.Error(), "would install skills into the user home directory") {
-			t.Fatalf("LinkGlobal(%q) error = %v, want explicit home-root error", customTarget, err)
+			t.Fatalf("MaterializeGlobal(%q) error = %v, want explicit home-root error", customTarget, err)
 		}
 	}
 }
 
-func TestLinkRejectsBareRelativePathWithoutPrefix(t *testing.T) {
+func TestMaterializeRejectsBareRelativePathWithoutPrefix(t *testing.T) {
 	t.Parallel()
 
-	err := target.Link(t.TempDir(), "./agent-skills/claude", "my-skill", "/store")
+	err := target.Materialize(t.TempDir(), "./agent-skills/claude", "my-skill", writeStoreSkill(t, t.TempDir(), "my-skill", "alpha"))
 	if err == nil {
-		t.Fatal("Link() error = nil, want unsupported target error")
+		t.Fatal("Materialize() error = nil, want unsupported target error")
 	}
 	if !strings.Contains(err.Error(), "unsupported target") {
-		t.Fatalf("Link() error = %v, want unsupported target error", err)
+		t.Fatalf("Materialize() error = %v, want unsupported target error", err)
 	}
 }
 
-func TestLinkRejectsCustomTargetWithSymlinkEscape(t *testing.T) {
+func TestMaterializeRejectsCustomTargetWithSymlinkEscape(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -290,73 +268,55 @@ func TestLinkRejectsCustomTargetWithSymlinkEscape(t *testing.T) {
 		t.Fatalf("Symlink() error = %v", err)
 	}
 
-	err := target.Link(root, "dir:linked/skills", "my-skill", "/store")
+	err := target.Materialize(root, "dir:linked/skills", "my-skill", writeStoreSkill(t, t.TempDir(), "my-skill", "alpha"))
 	if err == nil {
-		t.Fatal("Link() error = nil, want symlink traversal error")
+		t.Fatal("Materialize() error = nil, want symlink traversal error")
 	}
 	if !strings.Contains(err.Error(), "escapes the managed scope via symlink traversal") {
-		t.Fatalf("Link() error = %v, want symlink traversal error", err)
+		t.Fatalf("Materialize() error = %v, want symlink traversal error", err)
 	}
 }
 
-func TestLinkGlobalCreatesHomeSymlink(t *testing.T) {
+func TestMaterializeGlobalCreatesInstalledCopy(t *testing.T) {
 	t.Parallel()
 
 	homeDir := t.TempDir()
-	store := filepath.Join(t.TempDir(), "my-skill")
+	store := writeStoreSkill(t, t.TempDir(), "my-skill", "alpha")
 
-	if err := target.LinkGlobal(homeDir, "claude", "my-skill", store); err != nil {
-		t.Fatalf("LinkGlobal() error = %v", err)
+	if err := target.MaterializeGlobal(homeDir, "claude", "my-skill", store); err != nil {
+		t.Fatalf("MaterializeGlobal() error = %v", err)
 	}
 
-	got, err := os.Readlink(filepath.Join(homeDir, ".claude", "skills", "my-skill"))
-	if err != nil {
-		t.Fatalf("Readlink() error = %v", err)
-	}
-	if got != store {
-		t.Fatalf("symlink target = %q, want %q", got, store)
-	}
+	assertInstalledSkill(t, filepath.Join(homeDir, ".claude", "skills", "my-skill"), "alpha")
 }
 
-func TestLinkGlobalSupportsHomeRelativeCustomTarget(t *testing.T) {
+func TestMaterializeGlobalSupportsHomeRelativeCustomTarget(t *testing.T) {
 	t.Parallel()
 
 	homeDir := t.TempDir()
-	store := filepath.Join(t.TempDir(), "my-skill")
+	store := writeStoreSkill(t, t.TempDir(), "my-skill", "alpha")
 
-	if err := target.LinkGlobal(homeDir, "dir:agent-skills/claude", "my-skill", store); err != nil {
-		t.Fatalf("LinkGlobal() error = %v", err)
+	if err := target.MaterializeGlobal(homeDir, "dir:agent-skills/claude", "my-skill", store); err != nil {
+		t.Fatalf("MaterializeGlobal() error = %v", err)
 	}
 
-	got, err := os.Readlink(filepath.Join(homeDir, "agent-skills", "claude", "my-skill"))
-	if err != nil {
-		t.Fatalf("Readlink() error = %v", err)
-	}
-	if got != store {
-		t.Fatalf("symlink target = %q, want %q", got, store)
-	}
+	assertInstalledSkill(t, filepath.Join(homeDir, "agent-skills", "claude", "my-skill"), "alpha")
 }
 
-func TestLinkGlobalSupportsTildeExpansion(t *testing.T) {
+func TestMaterializeGlobalSupportsTildeExpansion(t *testing.T) {
 	t.Parallel()
 
 	homeDir := t.TempDir()
-	store := filepath.Join(t.TempDir(), "my-skill")
+	store := writeStoreSkill(t, t.TempDir(), "my-skill", "alpha")
 
-	if err := target.LinkGlobal(homeDir, "dir:~/agent-skills/claude", "my-skill", store); err != nil {
-		t.Fatalf("LinkGlobal() error = %v", err)
+	if err := target.MaterializeGlobal(homeDir, "dir:~/agent-skills/claude", "my-skill", store); err != nil {
+		t.Fatalf("MaterializeGlobal() error = %v", err)
 	}
 
-	got, err := os.Readlink(filepath.Join(homeDir, "agent-skills", "claude", "my-skill"))
-	if err != nil {
-		t.Fatalf("Readlink() error = %v", err)
-	}
-	if got != store {
-		t.Fatalf("symlink target = %q, want %q", got, store)
-	}
+	assertInstalledSkill(t, filepath.Join(homeDir, "agent-skills", "claude", "my-skill"), "alpha")
 }
 
-func TestLinkGlobalRejectsCustomTargetWithSymlinkEscape(t *testing.T) {
+func TestMaterializeGlobalRejectsCustomTargetWithSymlinkEscape(t *testing.T) {
 	t.Parallel()
 
 	homeDir := t.TempDir()
@@ -365,47 +325,80 @@ func TestLinkGlobalRejectsCustomTargetWithSymlinkEscape(t *testing.T) {
 		t.Fatalf("Symlink() error = %v", err)
 	}
 
-	err := target.LinkGlobal(homeDir, "dir:linked/skills", "my-skill", "/store")
+	err := target.MaterializeGlobal(homeDir, "dir:linked/skills", "my-skill", writeStoreSkill(t, t.TempDir(), "my-skill", "alpha"))
 	if err == nil {
-		t.Fatal("LinkGlobal() error = nil, want symlink traversal error")
+		t.Fatal("MaterializeGlobal() error = nil, want symlink traversal error")
 	}
 	if !strings.Contains(err.Error(), "escapes the managed scope via symlink traversal") {
-		t.Fatalf("LinkGlobal() error = %v, want symlink traversal error", err)
+		t.Fatalf("MaterializeGlobal() error = %v, want symlink traversal error", err)
 	}
 }
 
-// TestUnlinkRemovesSymlink verifies that Unlink removes an existing symlink.
-func TestUnlinkRemovesSymlink(t *testing.T) {
+func TestReplaceSwapsInstalledDirectory(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	store := filepath.Join(t.TempDir(), "my-skill")
+	store1 := writeStoreSkill(t, t.TempDir(), "my-skill", "alpha")
+	store2 := writeStoreSkill(t, t.TempDir(), "my-skill", "beta")
 
-	if err := target.Link(root, "claude", "my-skill", store); err != nil {
-		t.Fatalf("Link() error = %v", err)
+	if err := target.Materialize(root, "claude", "my-skill", store1); err != nil {
+		t.Fatalf("Materialize() error = %v", err)
 	}
-	if err := target.Unlink(root, "claude", "my-skill"); err != nil {
-		t.Fatalf("Unlink() error = %v", err)
+	if err := target.Replace(root, "claude", "my-skill", store2); err != nil {
+		t.Fatalf("Replace() error = %v", err)
+	}
+
+	assertInstalledSkill(t, claudeLink(root, "my-skill"), "beta")
+}
+
+func TestReplaceRejectsLegacySymlink(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	dir := filepath.Join(root, ".claude", "skills")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.Symlink("/tmp/old-skill", filepath.Join(dir, "my-skill")); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
+	}
+
+	err := target.Replace(root, "claude", "my-skill", writeStoreSkill(t, t.TempDir(), "my-skill", "alpha"))
+	if err == nil {
+		t.Fatal("Replace() error = nil, want legacy symlink error")
+	}
+	if !strings.Contains(err.Error(), "legacy symlink install") {
+		t.Fatalf("Replace() error = %v, want legacy symlink error", err)
+	}
+}
+
+func TestRemoveRemovesInstalledDirectory(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := writeStoreSkill(t, t.TempDir(), "my-skill", "alpha")
+
+	if err := target.Materialize(root, "claude", "my-skill", store); err != nil {
+		t.Fatalf("Materialize() error = %v", err)
+	}
+	if err := target.Remove(root, "claude", "my-skill"); err != nil {
+		t.Fatalf("Remove() error = %v", err)
 	}
 	if _, err := os.Lstat(claudeLink(root, "my-skill")); !os.IsNotExist(err) {
-		t.Fatalf("symlink still exists after Unlink")
+		t.Fatalf("target still exists after Remove")
 	}
 }
 
-// TestUnlinkIsIdempotent verifies that Unlink on a missing path succeeds.
-func TestUnlinkIsIdempotent(t *testing.T) {
+func TestRemoveIsIdempotent(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	// No symlink created — must not error.
-	if err := target.Unlink(root, "claude", "my-skill"); err != nil {
-		t.Fatalf("Unlink() on missing path error = %v", err)
+	if err := target.Remove(root, "claude", "my-skill"); err != nil {
+		t.Fatalf("Remove() on missing path error = %v", err)
 	}
 }
 
-// TestUnlinkRejectsNonSymlink verifies that Unlink errors rather than deleting
-// a regular file that occupies the link path.
-func TestUnlinkRejectsNonSymlink(t *testing.T) {
+func TestRemoveRejectsNonDirectory(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -417,66 +410,76 @@ func TestUnlinkRejectsNonSymlink(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	err := target.Unlink(root, "claude", "my-skill")
+	err := target.Remove(root, "claude", "my-skill")
 	if err == nil {
-		t.Fatal("Unlink() error = nil, want not-a-symlink error")
+		t.Fatal("Remove() error = nil, want non-directory error")
 	}
-	if !strings.Contains(err.Error(), "not a symlink") {
-		t.Fatalf("Unlink() error = %v, want 'not a symlink'", err)
-	}
-
-	// File must be untouched.
-	if _, err := os.Stat(filepath.Join(dir, "my-skill")); err != nil {
-		t.Fatalf("file removed unexpectedly: %v", err)
+	if !strings.Contains(err.Error(), "not a directory") {
+		t.Fatalf("Remove() error = %v, want non-directory error", err)
 	}
 }
 
-// TestUnlinkRejectsUnsupportedTarget verifies that Unlink errors on unknown targets.
-func TestUnlinkRejectsUnsupportedTarget(t *testing.T) {
-	t.Parallel()
-
-	err := target.Unlink(t.TempDir(), "unknown-agent", "my-skill")
-	if err == nil {
-		t.Fatal("Unlink() error = nil, want unsupported target error")
-	}
-	if !strings.Contains(err.Error(), "unsupported target") {
-		t.Fatalf("Unlink() error = %v, want 'unsupported target'", err)
-	}
-}
-
-// TestUnlinkAllRemovesAcrossTargets verifies that UnlinkAll removes symlinks
-// from every listed target.
-func TestUnlinkAllRemovesAcrossTargets(t *testing.T) {
+func TestRemoveRejectsLegacySymlink(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	store := filepath.Join(t.TempDir(), "my-skill")
-
-	if err := target.LinkAll(root, []string{"claude", "codex"}, "my-skill", store); err != nil {
-		t.Fatalf("LinkAll() error = %v", err)
+	dir := filepath.Join(root, ".claude", "skills")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
 	}
-	if err := target.UnlinkAll(root, []string{"claude", "codex"}, "my-skill"); err != nil {
-		t.Fatalf("UnlinkAll() error = %v", err)
+	if err := os.Symlink("/tmp/old-skill", filepath.Join(dir, "my-skill")); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
 	}
 
-	for _, link := range []string{claudeLink(root, "my-skill"), codexLink(root, "my-skill")} {
-		if _, err := os.Lstat(link); !os.IsNotExist(err) {
-			t.Fatalf("symlink %s still exists after UnlinkAll", link)
+	err := target.Remove(root, "claude", "my-skill")
+	if err == nil {
+		t.Fatal("Remove() error = nil, want legacy symlink error")
+	}
+	if !strings.Contains(err.Error(), "legacy symlink install") {
+		t.Fatalf("Remove() error = %v, want legacy symlink error", err)
+	}
+}
+
+func TestRemoveRejectsUnsupportedTarget(t *testing.T) {
+	t.Parallel()
+
+	err := target.Remove(t.TempDir(), "unknown-agent", "my-skill")
+	if err == nil {
+		t.Fatal("Remove() error = nil, want unsupported target error")
+	}
+	if !strings.Contains(err.Error(), "unsupported target") {
+		t.Fatalf("Remove() error = %v, want 'unsupported target'", err)
+	}
+}
+
+func TestRemoveAllRemovesAcrossTargets(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := writeStoreSkill(t, t.TempDir(), "my-skill", "alpha")
+
+	if err := target.MaterializeAll(root, []string{"claude", "codex"}, "my-skill", store); err != nil {
+		t.Fatalf("MaterializeAll() error = %v", err)
+	}
+	if err := target.RemoveAll(root, []string{"claude", "codex"}, "my-skill"); err != nil {
+		t.Fatalf("RemoveAll() error = %v", err)
+	}
+
+	for _, path := range []string{claudeLink(root, "my-skill"), codexLink(root, "my-skill")} {
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Fatalf("target %s still exists after RemoveAll", path)
 		}
 	}
 }
 
-// TestUnlinkAllStopsOnFirstError verifies that UnlinkAll aborts on the first
-// failure and does not silently skip errors.
-func TestUnlinkAllStopsOnFirstError(t *testing.T) {
+func TestRemoveAllStopsOnFirstError(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	store := filepath.Join(t.TempDir(), "my-skill")
+	store := writeStoreSkill(t, t.TempDir(), "my-skill", "alpha")
 
-	// Create a codex symlink but put a regular file in the claude slot.
-	if err := target.Link(root, "codex", "my-skill", store); err != nil {
-		t.Fatalf("Link(codex) error = %v", err)
+	if err := target.Materialize(root, "codex", "my-skill", store); err != nil {
+		t.Fatalf("Materialize(codex) error = %v", err)
 	}
 	claudeDir := filepath.Join(root, ".claude", "skills")
 	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
@@ -486,17 +489,49 @@ func TestUnlinkAllStopsOnFirstError(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	// claude comes first alphabetically in this list — it should fail.
-	err := target.UnlinkAll(root, []string{"claude", "codex"}, "my-skill")
+	err := target.RemoveAll(root, []string{"claude", "codex"}, "my-skill")
 	if err == nil {
-		t.Fatal("UnlinkAll() error = nil, want error")
+		t.Fatal("RemoveAll() error = nil, want error")
 	}
-	if !strings.Contains(err.Error(), "not a symlink") {
-		t.Fatalf("UnlinkAll() error = %v, want 'not a symlink'", err)
+	if !strings.Contains(err.Error(), "not a directory") {
+		t.Fatalf("RemoveAll() error = %v, want non-directory error", err)
 	}
 
-	// Codex symlink must still be intact since we stopped after the claude error.
-	if _, err := os.Lstat(codexLink(root, "my-skill")); err != nil {
-		t.Fatalf("codex symlink removed despite error: %v", err)
+	assertInstalledSkill(t, codexLink(root, "my-skill"), "alpha")
+}
+
+func writeStoreSkill(t *testing.T, root, skillName, marker string) string {
+	t.Helper()
+
+	path := filepath.Join(root, skillName)
+	if err := os.MkdirAll(filepath.Join(path, "tools"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	skillDoc := "---\nname: " + skillName + "\ndescription: " + marker + "\n---\n\n# " + skillName + "\n"
+	if err := os.WriteFile(filepath.Join(path, "SKILL.md"), []byte(skillDoc), 0o644); err != nil {
+		t.Fatalf("WriteFile(SKILL.md) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "tools", "helper.txt"), []byte(marker), 0o644); err != nil {
+		t.Fatalf("WriteFile(helper.txt) error = %v", err)
+	}
+	return path
+}
+
+func assertInstalledSkill(t *testing.T, path, marker string) {
+	t.Helper()
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat(%s) error = %v", path, err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("%s is not a directory", path)
+	}
+	data, err := os.ReadFile(filepath.Join(path, "tools", "helper.txt"))
+	if err != nil {
+		t.Fatalf("ReadFile(helper.txt) error = %v", err)
+	}
+	if string(data) != marker {
+		t.Fatalf("helper.txt = %q, want %q", string(data), marker)
 	}
 }

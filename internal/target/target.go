@@ -6,17 +6,19 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/Z-Bra0/Ski/internal/fsutil"
 )
 
 const customDirPrefix = "dir:"
 
-// LinkAll links a skill into every target directory in project scope.
-func LinkAll(projectRoot string, targets []string, name, storePath string) error {
+// MaterializeAll copies a skill into every target directory in project scope.
+func MaterializeAll(projectRoot string, targets []string, name, storePath string) error {
 	return linkAll(projectRoot, false, targets, name, storePath)
 }
 
-// LinkAllGlobal links a skill into every target directory in global scope.
-func LinkAllGlobal(homeDir string, targets []string, name, storePath string) error {
+// MaterializeAllGlobal copies a skill into every target directory in global scope.
+func MaterializeAllGlobal(homeDir string, targets []string, name, storePath string) error {
 	return linkAll(homeDir, true, targets, name, storePath)
 }
 
@@ -33,8 +35,8 @@ func linkAll(baseDir string, global bool, targets []string, name, storePath stri
 	return nil
 }
 
-// Link links a skill into one project-scoped target directory.
-func Link(projectRoot, target, name, storePath string) error {
+// Materialize copies a skill into one project-scoped target directory.
+func Materialize(projectRoot, target, name, storePath string) error {
 	dir, err := SkillDir(projectRoot, target)
 	if err != nil {
 		return err
@@ -42,8 +44,8 @@ func Link(projectRoot, target, name, storePath string) error {
 	return linkDir(dir, name, storePath)
 }
 
-// LinkGlobal links a skill into one global-scoped target directory.
-func LinkGlobal(homeDir, target, name, storePath string) error {
+// MaterializeGlobal copies a skill into one global-scoped target directory.
+func MaterializeGlobal(homeDir, target, name, storePath string) error {
 	dir, err := GlobalSkillDir(homeDir, target)
 	if err != nil {
 		return err
@@ -56,38 +58,95 @@ func linkDir(dir, name, storePath string) error {
 		return fmt.Errorf("mkdir %s: %w", dir, err)
 	}
 
-	linkPath := filepath.Join(dir, name)
-	info, err := os.Lstat(linkPath)
+	entryPath := filepath.Join(dir, name)
+	info, err := os.Lstat(entryPath)
 	if err == nil {
-		if info.Mode()&os.ModeSymlink == 0 {
-			return fmt.Errorf("%s already exists and is not a symlink", linkPath)
+		if info.Mode()&os.ModeSymlink != 0 {
+			return legacySymlinkError(entryPath)
 		}
-		current, err := os.Readlink(linkPath)
-		if err != nil {
-			return fmt.Errorf("readlink %s: %w", linkPath, err)
+		if !info.IsDir() {
+			return fmt.Errorf("%s already exists and is not a directory", entryPath)
 		}
-		if current == storePath {
-			return nil
-		}
-		return fmt.Errorf("%s already links to %s", linkPath, current)
+		return fmt.Errorf("%s already exists", entryPath)
 	}
 	if !os.IsNotExist(err) {
-		return fmt.Errorf("lstat %s: %w", linkPath, err)
+		return fmt.Errorf("lstat %s: %w", entryPath, err)
 	}
 
-	if err := os.Symlink(storePath, linkPath); err != nil {
-		return fmt.Errorf("symlink %s -> %s: %w", linkPath, storePath, err)
+	return installDir(dir, name, storePath)
+}
+
+// Replace swaps the installed target entry for one project-scoped target directory.
+func Replace(projectRoot, target, name, storePath string) error {
+	dir, err := SkillDir(projectRoot, target)
+	if err != nil {
+		return err
+	}
+	return replaceDir(dir, name, storePath)
+}
+
+// ReplaceGlobal swaps the installed target entry for one global-scoped target directory.
+func ReplaceGlobal(homeDir, target, name, storePath string) error {
+	dir, err := GlobalSkillDir(homeDir, target)
+	if err != nil {
+		return err
+	}
+	return replaceDir(dir, name, storePath)
+}
+
+func replaceDir(dir, name, storePath string) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", dir, err)
+	}
+
+	entryPath := filepath.Join(dir, name)
+	info, err := os.Lstat(entryPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return installDir(dir, name, storePath)
+	}
+	if err != nil {
+		return fmt.Errorf("lstat %s: %w", entryPath, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return legacySymlinkError(entryPath)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%s already exists and is not a directory", entryPath)
+	}
+
+	stagePath, err := stageCopy(dir, name, storePath)
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(stagePath)
+
+	backupPath, err := reserveBackupPath(dir, name)
+	if err != nil {
+		return err
+	}
+	if err := os.Rename(entryPath, backupPath); err != nil {
+		return fmt.Errorf("rename %s to backup: %w", entryPath, err)
+	}
+	if err := os.Rename(stagePath, entryPath); err != nil {
+		restoreErr := os.Rename(backupPath, entryPath)
+		if restoreErr != nil {
+			return fmt.Errorf("finalize %s: %w (restore failed: %v)", entryPath, err, restoreErr)
+		}
+		return fmt.Errorf("finalize %s: %w", entryPath, err)
+	}
+	if err := os.RemoveAll(backupPath); err != nil {
+		return fmt.Errorf("remove backup %s: %w", backupPath, err)
 	}
 	return nil
 }
 
-// UnlinkAll removes a skill link from every project-scoped target directory.
-func UnlinkAll(projectRoot string, targets []string, name string) error {
+// RemoveAll removes a skill entry from every project-scoped target directory.
+func RemoveAll(projectRoot string, targets []string, name string) error {
 	return unlinkAll(projectRoot, false, targets, name)
 }
 
-// UnlinkAllGlobal removes a skill link from every global-scoped target directory.
-func UnlinkAllGlobal(homeDir string, targets []string, name string) error {
+// RemoveAllGlobal removes a skill entry from every global-scoped target directory.
+func RemoveAllGlobal(homeDir string, targets []string, name string) error {
 	return unlinkAll(homeDir, true, targets, name)
 }
 
@@ -104,8 +163,8 @@ func unlinkAll(baseDir string, global bool, targets []string, name string) error
 	return nil
 }
 
-// Unlink removes a skill link from one project-scoped target directory.
-func Unlink(projectRoot, target, name string) error {
+// Remove removes a skill entry from one project-scoped target directory.
+func Remove(projectRoot, target, name string) error {
 	dir, err := SkillDir(projectRoot, target)
 	if err != nil {
 		return err
@@ -113,8 +172,8 @@ func Unlink(projectRoot, target, name string) error {
 	return unlinkDir(dir, name)
 }
 
-// UnlinkGlobal removes a skill link from one global-scoped target directory.
-func UnlinkGlobal(homeDir, target, name string) error {
+// RemoveGlobal removes a skill entry from one global-scoped target directory.
+func RemoveGlobal(homeDir, target, name string) error {
 	dir, err := GlobalSkillDir(homeDir, target)
 	if err != nil {
 		return err
@@ -123,21 +182,67 @@ func UnlinkGlobal(homeDir, target, name string) error {
 }
 
 func unlinkDir(dir, name string) error {
-	linkPath := filepath.Join(dir, name)
-	info, err := os.Lstat(linkPath)
+	entryPath := filepath.Join(dir, name)
+	info, err := os.Lstat(entryPath)
 	if os.IsNotExist(err) {
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("lstat %s: %w", linkPath, err)
+		return fmt.Errorf("lstat %s: %w", entryPath, err)
 	}
-	if info.Mode()&os.ModeSymlink == 0 {
-		return fmt.Errorf("%s is not a symlink; remove it manually", linkPath)
+	if info.Mode()&os.ModeSymlink != 0 {
+		return legacySymlinkError(entryPath)
 	}
-	if err := os.Remove(linkPath); err != nil {
-		return fmt.Errorf("remove %s: %w", linkPath, err)
+	if !info.IsDir() {
+		return fmt.Errorf("%s is not a directory; remove it manually", entryPath)
+	}
+	if err := os.RemoveAll(entryPath); err != nil {
+		return fmt.Errorf("remove %s: %w", entryPath, err)
 	}
 	return nil
+}
+
+func installDir(dir, name, storePath string) error {
+	stagePath, err := stageCopy(dir, name, storePath)
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(stagePath)
+
+	entryPath := filepath.Join(dir, name)
+	if err := os.Rename(stagePath, entryPath); err != nil {
+		return fmt.Errorf("finalize %s: %w", entryPath, err)
+	}
+	return nil
+}
+
+func stageCopy(dir, name, storePath string) (string, error) {
+	stagePath, err := os.MkdirTemp(dir, "."+name+"-staged-")
+	if err != nil {
+		return "", fmt.Errorf("create staging dir for %s: %w", filepath.Join(dir, name), err)
+	}
+	if err := os.Remove(stagePath); err != nil {
+		return "", fmt.Errorf("prepare staging path %s: %w", stagePath, err)
+	}
+	if err := fsutil.CopyTree(storePath, stagePath); err != nil {
+		return "", fmt.Errorf("copy %s to staging dir: %w", storePath, err)
+	}
+	return stagePath, nil
+}
+
+func reserveBackupPath(dir, name string) (string, error) {
+	backupPath, err := os.MkdirTemp(dir, "."+name+"-backup-")
+	if err != nil {
+		return "", fmt.Errorf("create backup path for %s: %w", filepath.Join(dir, name), err)
+	}
+	if err := os.Remove(backupPath); err != nil {
+		return "", fmt.Errorf("prepare backup path %s: %w", backupPath, err)
+	}
+	return backupPath, nil
+}
+
+func legacySymlinkError(path string) error {
+	return fmt.Errorf("legacy symlink install at %s is unsupported; remove it and reinstall the skill", path)
 }
 
 // SkillDir resolves a target name to its project-scoped directory.
