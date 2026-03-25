@@ -308,3 +308,113 @@ func TestDoctorReportsStaleTargetFromRemovedTarget(t *testing.T) {
 		t.Fatalf("stdout = %q, want stale codex target finding", out)
 	}
 }
+
+func TestDoctorFixRepairsMissingTargetInstall(t *testing.T) {
+	t.Parallel()
+
+	repoPath, commit := createGitRepo(t, "repo-map", "repo-map")
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	installManifestForTest(t, projectDir, homeDir, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills: []manifest.Skill{
+			{
+				Name:   "repo-map",
+				Source: "git:" + repoPath + "@v1.0.0",
+			},
+		},
+	})
+
+	targetPath := filepath.Join(projectDir, ".claude", "skills", "repo-map")
+	if err := os.RemoveAll(targetPath); err != nil {
+		t.Fatalf("RemoveAll(target) error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	doctorCmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &stdout,
+		Stderr:     &bytes.Buffer{},
+	})
+	doctorCmd.SetArgs([]string{"doctor", "--fix"})
+	if err := doctorCmd.Execute(); err != nil {
+		t.Fatalf("doctor --fix Execute() error = %v", err)
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "fixed: materialized claude target") {
+		t.Fatalf("stdout = %q, want fixed materialize output", out)
+	}
+	if !strings.Contains(out, "doctor: fixed 1 issues") {
+		t.Fatalf("stdout = %q, want fixed summary", out)
+	}
+
+	assertInstalledSkillMatchesStore(t, targetPath, filepath.Join(homeDir, ".ski", "store", "git", "repo-map", commit))
+
+	stdout.Reset()
+	doctorCmd = NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &stdout,
+		Stderr:     &bytes.Buffer{},
+	})
+	doctorCmd.SetArgs([]string{"doctor"})
+	if err := doctorCmd.Execute(); err != nil {
+		t.Fatalf("doctor Execute() after fix error = %v", err)
+	}
+	if !strings.Contains(stdout.String(), "doctor: ok") {
+		t.Fatalf("stdout = %q, want doctor ok after fix", stdout.String())
+	}
+}
+
+func TestDoctorFixReportsManualInterventionForLegacySymlink(t *testing.T) {
+	t.Parallel()
+
+	repoPath, _ := createGitRepo(t, "repo-map", "repo-map")
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	installManifestForTest(t, projectDir, homeDir, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills: []manifest.Skill{
+			{
+				Name:   "repo-map",
+				Source: "git:" + repoPath + "@v1.0.0",
+			},
+		},
+	})
+
+	targetPath := filepath.Join(projectDir, ".claude", "skills", "repo-map")
+	if err := os.RemoveAll(targetPath); err != nil {
+		t.Fatalf("RemoveAll(target) error = %v", err)
+	}
+	manualDir := t.TempDir()
+	if err := os.Symlink(manualDir, targetPath); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	doctorCmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &stdout,
+		Stderr:     &bytes.Buffer{},
+	})
+	doctorCmd.SetArgs([]string{"doctor", "--fix"})
+	err := doctorCmd.Execute()
+	if err == nil {
+		t.Fatal("doctor --fix Execute() error = nil, want manual intervention error")
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "skipped: manual intervention required") {
+		t.Fatalf("stdout = %q, want skipped output", out)
+	}
+	if !strings.Contains(out, "doctor: fixed 0 issues, 1 require manual intervention") {
+		t.Fatalf("stdout = %q, want manual summary", out)
+	}
+}

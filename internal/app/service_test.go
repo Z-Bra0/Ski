@@ -17,7 +17,7 @@ import (
 func TestAddSelectedRollsBackAfterLinkFailure(t *testing.T) {
 	t.Parallel()
 
-	repo := createMultiSkillRepo(t, "skill-pack", []multiSkillSpec{
+	repo := testutil.NewMultiSkillRepo(t, "skill-pack", []testutil.SkillSpec{
 		{Path: filepath.Join("skills", "alpha-skill"), Name: "alpha-skill"},
 		{Path: filepath.Join("skills", "beta-skill"), Name: "beta-skill"},
 	})
@@ -149,7 +149,7 @@ func TestAddSelectedUsesSkillLevelTargetOverride(t *testing.T) {
 func TestAddSelectedHonorsLegacySourceSelectorsWithoutExplicitSelection(t *testing.T) {
 	t.Parallel()
 
-	repo := createMultiSkillRepo(t, "skill-pack", []multiSkillSpec{
+	repo := testutil.NewMultiSkillRepo(t, "skill-pack", []testutil.SkillSpec{
 		{Path: filepath.Join("skills", "alpha-skill"), Name: "alpha-skill"},
 		{Path: filepath.Join("skills", "beta-skill"), Name: "beta-skill"},
 	})
@@ -377,7 +377,7 @@ func TestListRejectsSkillLevelTargetsWithWhitespace(t *testing.T) {
 func TestInstallRollsBackAfterLinkFailure(t *testing.T) {
 	t.Parallel()
 
-	repo := createMultiSkillRepo(t, "skill-pack", []multiSkillSpec{
+	repo := testutil.NewMultiSkillRepo(t, "skill-pack", []testutil.SkillSpec{
 		{Path: filepath.Join("skills", "alpha-skill"), Name: "alpha-skill"},
 		{Path: filepath.Join("skills", "beta-skill"), Name: "beta-skill"},
 	})
@@ -437,7 +437,7 @@ func TestInstallRollsBackAfterLinkFailure(t *testing.T) {
 func TestUpdateRollsBackAfterLinkFailure(t *testing.T) {
 	t.Parallel()
 
-	repo := createMultiSkillRepo(t, "skill-pack", []multiSkillSpec{
+	repo := testutil.NewMultiSkillRepo(t, "skill-pack", []testutil.SkillSpec{
 		{Path: filepath.Join("skills", "alpha-skill"), Name: "alpha-skill"},
 		{Path: filepath.Join("skills", "beta-skill"), Name: "beta-skill"},
 	})
@@ -684,21 +684,6 @@ func TestUpdateWithoutLockfileReplaces(t *testing.T) {
 	}
 }
 
-type multiSkillSpec struct {
-	Path string
-	Name string
-}
-
-func createMultiSkillRepo(t *testing.T, repoName string, specs []multiSkillSpec) testutil.Repo {
-	t.Helper()
-
-	repoSpecs := make([]testutil.SkillSpec, 0, len(specs))
-	for _, spec := range specs {
-		repoSpecs = append(repoSpecs, testutil.SkillSpec{Path: spec.Path, Name: spec.Name})
-	}
-	return testutil.NewMultiSkillRepo(t, repoName, repoSpecs)
-}
-
 func assertInstalledSkillDir(t *testing.T, path string) {
 	t.Helper()
 	info, err := os.Stat(path)
@@ -719,7 +704,7 @@ func assertInstalledSkillDir(t *testing.T, path string) {
 func TestUpdateForceReplaceRollbackRestoresOriginal(t *testing.T) {
 	t.Parallel()
 
-	repo := createMultiSkillRepo(t, "skill-pack", []multiSkillSpec{
+	repo := testutil.NewMultiSkillRepo(t, "skill-pack", []testutil.SkillSpec{
 		{Path: filepath.Join("skills", "alpha-skill"), Name: "alpha-skill"},
 		{Path: filepath.Join("skills", "beta-skill"), Name: "beta-skill"},
 	})

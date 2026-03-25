@@ -56,6 +56,16 @@ type discoveredSkillNameResult struct {
 
 // DiscoverGit fetches or loads a git repository snapshot from the shared store.
 func DiscoverGit(projectRoot, homeDir string, spec source.Git) (RepoResult, error) {
+	return discoverGit(projectRoot, homeDir, spec, false)
+}
+
+// RefreshGit refetches a git repository snapshot and replaces the cached store
+// entry for the resolved commit.
+func RefreshGit(projectRoot, homeDir string, spec source.Git) (RepoResult, error) {
+	return discoverGit(projectRoot, homeDir, spec, true)
+}
+
+func discoverGit(projectRoot, homeDir string, spec source.Git, forceRefresh bool) (RepoResult, error) {
 	storeKeys, err := deriveGitStoreKeys(spec)
 	if err != nil {
 		return RepoResult{}, err
@@ -63,13 +73,15 @@ func DiscoverGit(projectRoot, homeDir string, spec source.Git) (RepoResult, erro
 	primaryStoreKey := storeKeys[0]
 
 	// Reuse an existing stored snapshot when we can cheaply resolve the commit.
-	if commit, ok := resolveStoreCommit(projectRoot, spec); ok {
-		repo, err := loadStoredRepoForAnyKey(homeDir, storeKeys, commit)
-		if err == nil {
-			return repo, nil
-		}
-		if !errors.Is(err, os.ErrNotExist) {
-			return RepoResult{}, err
+	if !forceRefresh {
+		if commit, ok := resolveStoreCommit(projectRoot, spec); ok {
+			repo, err := loadStoredRepoForAnyKey(homeDir, storeKeys, commit)
+			if err == nil {
+				return repo, nil
+			}
+			if !errors.Is(err, os.ErrNotExist) {
+				return RepoResult{}, err
+			}
 		}
 	}
 
@@ -96,12 +108,14 @@ func DiscoverGit(projectRoot, homeDir string, spec source.Git) (RepoResult, erro
 	}
 
 	storePath := gitStorePath(homeDir, primaryStoreKey, commit)
-	repo, err := loadStoredRepoForAnyKey(homeDir, storeKeys, commit)
-	if err == nil {
-		return repo, nil
-	}
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return RepoResult{}, err
+	if !forceRefresh {
+		repo, err := loadStoredRepoForAnyKey(homeDir, storeKeys, commit)
+		if err == nil {
+			return repo, nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return RepoResult{}, err
+		}
 	}
 
 	skills, invalidSkills, err := discoverSkills(checkoutDir)
@@ -110,7 +124,7 @@ func DiscoverGit(projectRoot, homeDir string, spec source.Git) (RepoResult, erro
 	}
 	if len(skills) == 0 {
 		if len(invalidSkills) > 0 {
-			rewritten, err := storeInvalidGitSnapshot(checkoutDir, storePath, invalidSkills)
+			rewritten, err := storeInvalidGitSnapshot(checkoutDir, storePath, invalidSkills, forceRefresh)
 			if err != nil {
 				return RepoResult{}, err
 			}
@@ -119,7 +133,7 @@ func DiscoverGit(projectRoot, homeDir string, spec source.Git) (RepoResult, erro
 		return RepoResult{}, fmt.Errorf("no skills found in repository")
 	}
 
-	if err := persistGitSnapshot(checkoutDir, storePath); err != nil {
+	if err := persistGitSnapshot(checkoutDir, storePath, forceRefresh); err != nil {
 		return RepoResult{}, err
 	}
 
@@ -131,14 +145,14 @@ func DiscoverGit(projectRoot, homeDir string, spec source.Git) (RepoResult, erro
 	), nil
 }
 
-func storeInvalidGitSnapshot(checkoutDir, storePath string, invalidSkills []InvalidSkill) ([]InvalidSkill, error) {
-	if err := persistGitSnapshot(checkoutDir, storePath); err != nil {
+func storeInvalidGitSnapshot(checkoutDir, storePath string, invalidSkills []InvalidSkill, replace bool) ([]InvalidSkill, error) {
+	if err := persistGitSnapshot(checkoutDir, storePath, replace); err != nil {
 		return nil, err
 	}
 	return rewriteInvalidSkillPaths(invalidSkills, checkoutDir, storePath), nil
 }
 
-func persistGitSnapshot(checkoutDir, storePath string) error {
+func persistGitSnapshot(checkoutDir, storePath string, replace bool) error {
 	if err := os.MkdirAll(filepath.Dir(storePath), 0o755); err != nil {
 		return fmt.Errorf("mkdir %s: %w", filepath.Dir(storePath), err)
 	}
@@ -146,10 +160,70 @@ func persistGitSnapshot(checkoutDir, storePath string) error {
 	if err := os.RemoveAll(filepath.Join(checkoutDir, ".git")); err != nil {
 		return fmt.Errorf("remove git metadata: %w", err)
 	}
-	if err := moveDirIntoStore(checkoutDir, storePath); err != nil {
+
+	if !replace {
+		if err := moveDirIntoStore(checkoutDir, storePath); err != nil {
+			return fmt.Errorf("move checkout into store: %w", err)
+		}
+		return nil
+	}
+
+	if err := replaceStoreSnapshot(checkoutDir, storePath); err != nil {
 		return fmt.Errorf("move checkout into store: %w", err)
 	}
 	return nil
+}
+
+func replaceStoreSnapshot(checkoutDir, storePath string) error {
+	parent := filepath.Dir(storePath)
+	stageRoot, err := os.MkdirTemp(parent, "."+filepath.Base(storePath)+"-stage-")
+	if err != nil {
+		return fmt.Errorf("create stage dir: %w", err)
+	}
+	defer os.RemoveAll(stageRoot)
+
+	stagePath := filepath.Join(stageRoot, filepath.Base(storePath))
+	if err := moveDirIntoStore(checkoutDir, stagePath); err != nil {
+		return err
+	}
+
+	if _, err := os.Stat(storePath); errors.Is(err, os.ErrNotExist) {
+		return renameDir(stagePath, storePath)
+	} else if err != nil {
+		return fmt.Errorf("stat %s: %w", storePath, err)
+	}
+
+	backupPath, err := stagedSwapPath(parent, filepath.Base(storePath), "backup")
+	if err != nil {
+		return err
+	}
+	if err := renameDir(storePath, backupPath); err != nil {
+		return fmt.Errorf("backup existing store snapshot %s: %w", storePath, err)
+	}
+
+	if err := renameDir(stagePath, storePath); err != nil {
+		restoreErr := renameDir(backupPath, storePath)
+		if restoreErr != nil {
+			return fmt.Errorf("replace store snapshot %s: %w (restore failed: %v)", storePath, err, restoreErr)
+		}
+		return fmt.Errorf("replace store snapshot %s: %w", storePath, err)
+	}
+
+	if err := os.RemoveAll(backupPath); err != nil {
+		return fmt.Errorf("remove store backup %s: %w", backupPath, err)
+	}
+	return nil
+}
+
+func stagedSwapPath(parent, base, label string) (string, error) {
+	path, err := os.MkdirTemp(parent, "."+base+"-"+label+"-")
+	if err != nil {
+		return "", fmt.Errorf("create %s path: %w", label, err)
+	}
+	if err := os.Remove(path); err != nil {
+		return "", fmt.Errorf("prepare %s path %s: %w", label, path, err)
+	}
+	return path, nil
 }
 
 // EnsureGit ensures a selected skill is present in the store and returns its path.

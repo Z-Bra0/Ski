@@ -11,10 +11,29 @@ import (
 	"github.com/Z-Bra0/Ski/internal/store"
 )
 
+const (
+	FindingKindMissingLockEntry     = "missing_lock_entry"
+	FindingKindOrphanedLockEntry    = "orphaned_lock_entry"
+	FindingKindSourceMismatch       = "source_mismatch"
+	FindingKindUpstreamMismatch     = "upstream_mismatch"
+	FindingKindTargetsMismatch      = "targets_mismatch"
+	FindingKindStoreMissing         = "store_missing"
+	FindingKindStoreInvalid         = "store_invalid"
+	FindingKindStoreIntegrity       = "store_integrity"
+	FindingKindMissingTargetInstall = "missing_target_install"
+	FindingKindDriftedTarget        = "drifted_target"
+	FindingKindUnexpectedTarget     = "unexpected_target"
+	FindingKindLegacySymlink        = "legacy_symlink"
+	FindingKindUnexpectedEntryType  = "unexpected_entry_type"
+)
+
 // DoctorFinding describes one inconsistency found by Service.Doctor.
 type DoctorFinding struct {
-	Skill   string
-	Message string
+	Kind       string
+	Skill      string
+	Message    string
+	TargetName string
+	StorePath  string
 }
 
 // String formats a DoctorFinding for CLI display.
@@ -46,6 +65,7 @@ func (s Service) Doctor() ([]DoctorFinding, error) {
 		locked, ok := lockByName[skill.Name]
 		if !ok {
 			findings = append(findings, DoctorFinding{
+				Kind:    FindingKindMissingLockEntry,
 				Skill:   skill.Name,
 				Message: "missing lockfile entry",
 			})
@@ -60,6 +80,7 @@ func (s Service) Doctor() ([]DoctorFinding, error) {
 			continue
 		}
 		findings = append(findings, DoctorFinding{
+			Kind:    FindingKindOrphanedLockEntry,
 			Skill:   skill.Name,
 			Message: "lockfile entry exists but skill is not declared in ski.toml",
 		})
@@ -76,6 +97,7 @@ func (s Service) doctorSkillFindings(doc *manifest.Manifest, skill manifest.Skil
 	manifestSource, manifestUpstream, err := canonicalSkillIdentity(skill.Source, skill.UpstreamSkill)
 	if err != nil {
 		findings = append(findings, DoctorFinding{
+			Kind:    FindingKindSourceMismatch,
 			Skill:   skill.Name,
 			Message: err.Error(),
 		})
@@ -84,6 +106,7 @@ func (s Service) doctorSkillFindings(doc *manifest.Manifest, skill manifest.Skil
 	lockSource, lockUpstream, err := canonicalSkillIdentity(locked.Source, locked.UpstreamSkill)
 	if err != nil {
 		findings = append(findings, DoctorFinding{
+			Kind:    FindingKindSourceMismatch,
 			Skill:   skill.Name,
 			Message: err.Error(),
 		})
@@ -92,18 +115,21 @@ func (s Service) doctorSkillFindings(doc *manifest.Manifest, skill manifest.Skil
 
 	if lockSource != manifestSource {
 		findings = append(findings, DoctorFinding{
+			Kind:    FindingKindSourceMismatch,
 			Skill:   skill.Name,
 			Message: fmt.Sprintf("lockfile source %q does not match manifest source %q", locked.Source, skill.Source),
 		})
 	}
 	if lockUpstream != manifestUpstream {
 		findings = append(findings, DoctorFinding{
+			Kind:    FindingKindUpstreamMismatch,
 			Skill:   skill.Name,
 			Message: fmt.Sprintf("lockfile upstream skill %q does not match manifest upstream skill %q", locked.UpstreamSkill, skill.UpstreamSkill),
 		})
 	}
 	if !sameStrings(expectedTargets, locked.Targets) {
 		findings = append(findings, DoctorFinding{
+			Kind:    FindingKindTargetsMismatch,
 			Skill:   skill.Name,
 			Message: fmt.Sprintf("lockfile targets %v do not match manifest targets %v", locked.Targets, expectedTargets),
 		})
@@ -112,6 +138,7 @@ func (s Service) doctorSkillFindings(doc *manifest.Manifest, skill manifest.Skil
 	src, err := s.loadSkillSourceForScope(locked.Source, locked.UpstreamSkill)
 	if err != nil {
 		findings = append(findings, DoctorFinding{
+			Kind:    FindingKindSourceMismatch,
 			Skill:   skill.Name,
 			Message: err.Error(),
 		})
@@ -119,38 +146,18 @@ func (s Service) doctorSkillFindings(doc *manifest.Manifest, skill manifest.Skil
 	}
 	stored, err := store.FindGit(s.HomeDir, src, locked.Commit, skill.Name)
 	if err != nil {
-		findings = append(findings, DoctorFinding{
-			Skill:   skill.Name,
-			Message: err.Error(),
-		})
+		findings = append(findings, classifyStoreFinding(skill.Name, err)...)
 		return findings
 	}
 	storePath := stored.Path
 
-	info, err := os.Stat(storePath)
-	switch {
-	case errors.Is(err, os.ErrNotExist):
+	if stored.Integrity != locked.Integrity {
 		findings = append(findings, DoctorFinding{
-			Skill:   skill.Name,
-			Message: fmt.Sprintf("store path %s is missing", storePath),
+			Kind:      FindingKindStoreIntegrity,
+			Skill:     skill.Name,
+			Message:   fmt.Sprintf("integrity mismatch: got %s, want %s", stored.Integrity, locked.Integrity),
+			StorePath: storePath,
 		})
-	case err != nil:
-		findings = append(findings, DoctorFinding{
-			Skill:   skill.Name,
-			Message: fmt.Sprintf("stat %s: %v", storePath, err),
-		})
-	case !info.IsDir():
-		findings = append(findings, DoctorFinding{
-			Skill:   skill.Name,
-			Message: fmt.Sprintf("store path %s is not a directory", storePath),
-		})
-	default:
-		if stored.Integrity != locked.Integrity {
-			findings = append(findings, DoctorFinding{
-				Skill:   skill.Name,
-				Message: fmt.Sprintf("integrity mismatch: got %s, want %s", stored.Integrity, locked.Integrity),
-			})
-		}
 	}
 
 	for _, targetName := range targetsToInspect {
@@ -161,51 +168,93 @@ func (s Service) doctorSkillFindings(doc *manifest.Manifest, skill manifest.Skil
 	return findings
 }
 
+func classifyStoreFinding(skillName string, err error) []DoctorFinding {
+	kind := FindingKindStoreInvalid
+	if errors.Is(err, os.ErrNotExist) {
+		kind = FindingKindStoreMissing
+	}
+	return []DoctorFinding{{
+		Kind:    kind,
+		Skill:   skillName,
+		Message: err.Error(),
+	}}
+}
+
 func (s Service) doctorTargetFindings(skillName, targetName, storePath string, shouldExist bool) []DoctorFinding {
-	inspection, err := s.inspectTarget(targetName, skillName, storePath)
+	expectedPath := ""
+	if shouldExist {
+		expectedPath = storePath
+	}
+	inspection, err := s.inspectTarget(targetName, skillName, expectedPath)
 	if err != nil {
 		return []DoctorFinding{{
-			Skill:   skillName,
-			Message: err.Error(),
+			Kind:       FindingKindUnexpectedEntryType,
+			Skill:      skillName,
+			Message:    err.Error(),
+			TargetName: targetName,
+			StorePath:  storePath,
 		}}
 	}
+
 	switch inspection.Status {
 	case targetStatusMissing:
 		if !shouldExist {
 			return nil
 		}
 		return []DoctorFinding{{
-			Skill:   skillName,
-			Message: fmt.Sprintf("missing %s target at %s", targetName, inspection.Path),
+			Kind:       FindingKindMissingTargetInstall,
+			Skill:      skillName,
+			Message:    fmt.Sprintf("missing %s target at %s", targetName, inspection.Path),
+			TargetName: targetName,
+			StorePath:  storePath,
 		}}
 	case targetStatusInstalled:
 		if shouldExist {
 			return nil
 		}
 		return []DoctorFinding{{
-			Skill:   skillName,
-			Message: fmt.Sprintf("unexpected %s target at %s", targetName, inspection.Path),
-		}}
-	case targetStatusLegacySymlink:
-		return []DoctorFinding{{
-			Skill:   skillName,
-			Message: legacySymlinkInstallError(inspection.Path).Error(),
+			Kind:       FindingKindUnexpectedTarget,
+			Skill:      skillName,
+			Message:    fmt.Sprintf("unexpected %s target at %s", targetName, inspection.Path),
+			TargetName: targetName,
+			StorePath:  storePath,
 		}}
 	case targetStatusDrifted:
-		return []DoctorFinding{{
-			Skill:   skillName,
-			Message: driftedTargetError(inspection.Path).Error(),
-		}}
-	default:
 		if !shouldExist {
 			return []DoctorFinding{{
-				Skill:   skillName,
-				Message: fmt.Sprintf("unexpected %s entry at %s", targetName, inspection.Path),
+				Kind:       FindingKindUnexpectedTarget,
+				Skill:      skillName,
+				Message:    fmt.Sprintf("unexpected %s target at %s", targetName, inspection.Path),
+				TargetName: targetName,
+				StorePath:  storePath,
 			}}
 		}
 		return []DoctorFinding{{
-			Skill:   skillName,
-			Message: fmt.Sprintf("%s is not a managed skill directory", inspection.Path),
+			Kind:       FindingKindDriftedTarget,
+			Skill:      skillName,
+			Message:    driftedTargetError(inspection.Path).Error(),
+			TargetName: targetName,
+			StorePath:  storePath,
+		}}
+	case targetStatusLegacySymlink:
+		return []DoctorFinding{{
+			Kind:       FindingKindLegacySymlink,
+			Skill:      skillName,
+			Message:    legacySymlinkInstallError(inspection.Path).Error(),
+			TargetName: targetName,
+			StorePath:  storePath,
+		}}
+	default:
+		message := fmt.Sprintf("%s is not a managed skill directory", inspection.Path)
+		if !shouldExist {
+			message = fmt.Sprintf("unexpected %s entry at %s", targetName, inspection.Path)
+		}
+		return []DoctorFinding{{
+			Kind:       FindingKindUnexpectedEntryType,
+			Skill:      skillName,
+			Message:    message,
+			TargetName: targetName,
+			StorePath:  storePath,
 		}}
 	}
 }
