@@ -56,6 +56,16 @@ type discoveredSkillNameResult struct {
 
 // DiscoverGit fetches or loads a git repository snapshot from the shared store.
 func DiscoverGit(projectRoot, homeDir string, spec source.Git) (RepoResult, error) {
+	return discoverGit(projectRoot, homeDir, spec, false)
+}
+
+// RefreshGit refetches a git repository snapshot and replaces the cached store
+// entry for the resolved commit.
+func RefreshGit(projectRoot, homeDir string, spec source.Git) (RepoResult, error) {
+	return discoverGit(projectRoot, homeDir, spec, true)
+}
+
+func discoverGit(projectRoot, homeDir string, spec source.Git, forceRefresh bool) (RepoResult, error) {
 	storeKeys, err := deriveGitStoreKeys(spec)
 	if err != nil {
 		return RepoResult{}, err
@@ -63,13 +73,15 @@ func DiscoverGit(projectRoot, homeDir string, spec source.Git) (RepoResult, erro
 	primaryStoreKey := storeKeys[0]
 
 	// Reuse an existing stored snapshot when we can cheaply resolve the commit.
-	if commit, ok := resolveStoreCommit(projectRoot, spec); ok {
-		repo, err := loadStoredRepoForAnyKey(homeDir, storeKeys, commit)
-		if err == nil {
-			return repo, nil
-		}
-		if !errors.Is(err, os.ErrNotExist) {
-			return RepoResult{}, err
+	if !forceRefresh {
+		if commit, ok := resolveStoreCommit(projectRoot, spec); ok {
+			repo, err := loadStoredRepoForAnyKey(homeDir, storeKeys, commit)
+			if err == nil {
+				return repo, nil
+			}
+			if !errors.Is(err, os.ErrNotExist) {
+				return RepoResult{}, err
+			}
 		}
 	}
 
@@ -96,12 +108,14 @@ func DiscoverGit(projectRoot, homeDir string, spec source.Git) (RepoResult, erro
 	}
 
 	storePath := gitStorePath(homeDir, primaryStoreKey, commit)
-	repo, err := loadStoredRepoForAnyKey(homeDir, storeKeys, commit)
-	if err == nil {
-		return repo, nil
-	}
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return RepoResult{}, err
+	if !forceRefresh {
+		repo, err := loadStoredRepoForAnyKey(homeDir, storeKeys, commit)
+		if err == nil {
+			return repo, nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return RepoResult{}, err
+		}
 	}
 
 	skills, invalidSkills, err := discoverSkills(checkoutDir)
@@ -110,6 +124,11 @@ func DiscoverGit(projectRoot, homeDir string, spec source.Git) (RepoResult, erro
 	}
 	if len(skills) == 0 {
 		if len(invalidSkills) > 0 {
+			if forceRefresh {
+				if err := removeStorePath(storePath); err != nil {
+					return RepoResult{}, err
+				}
+			}
 			rewritten, err := storeInvalidGitSnapshot(checkoutDir, storePath, invalidSkills)
 			if err != nil {
 				return RepoResult{}, err
@@ -119,6 +138,11 @@ func DiscoverGit(projectRoot, homeDir string, spec source.Git) (RepoResult, erro
 		return RepoResult{}, fmt.Errorf("no skills found in repository")
 	}
 
+	if forceRefresh {
+		if err := removeStorePath(storePath); err != nil {
+			return RepoResult{}, err
+		}
+	}
 	if err := persistGitSnapshot(checkoutDir, storePath); err != nil {
 		return RepoResult{}, err
 	}
@@ -129,6 +153,13 @@ func DiscoverGit(projectRoot, homeDir string, spec source.Git) (RepoResult, erro
 		skills,
 		rewriteInvalidSkillPaths(invalidSkills, checkoutDir, storePath),
 	), nil
+}
+
+func removeStorePath(storePath string) error {
+	if err := os.RemoveAll(storePath); err != nil {
+		return fmt.Errorf("remove existing store snapshot %s: %w", storePath, err)
+	}
+	return nil
 }
 
 func storeInvalidGitSnapshot(checkoutDir, storePath string, invalidSkills []InvalidSkill) ([]InvalidSkill, error) {

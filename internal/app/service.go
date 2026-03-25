@@ -334,6 +334,22 @@ func cloneLockfile(doc lockfile.Lockfile) lockfile.Lockfile {
 	return clone
 }
 
+func buildLockSkill(skill manifest.Skill, stored store.Result, effectiveTargets []string) (lockfile.Skill, error) {
+	lockEntry := lockfile.Skill{
+		Name:      skill.Name,
+		Version:   skill.Version,
+		Commit:    stored.Commit,
+		Integrity: stored.Integrity,
+		Targets:   append([]string(nil), effectiveTargets...),
+	}
+	var err error
+	lockEntry.Source, lockEntry.UpstreamSkill, err = canonicalSkillIdentity(skill.Source, skill.UpstreamSkill)
+	if err != nil {
+		return lockfile.Skill{}, err
+	}
+	return lockEntry, nil
+}
+
 func restoreProjectFiles(manifestPath string, manifestData []byte, lockPath string, lockData []byte, hadLockfile bool) error {
 	if err := os.WriteFile(manifestPath, manifestData, 0o644); err != nil {
 		return fmt.Errorf("restore %s: %w", manifestPath, err)
