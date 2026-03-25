@@ -226,6 +226,55 @@ func TestFindGitFallsBackToLegacyStoreKey(t *testing.T) {
 	}
 }
 
+func TestRefreshGitPreservesExistingSnapshotWhenReplaceFails(t *testing.T) {
+	t.Parallel()
+
+	repo := testutil.NewSkillRepo(t, "repo-map", "repo-map")
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+	spec := source.Git{URL: repo.URL}
+
+	stored, err := EnsureGit(projectDir, homeDir, spec, "repo-map")
+	if err != nil {
+		t.Fatalf("EnsureGit() error = %v", err)
+	}
+
+	markerPath := filepath.Join(homeDir, ".ski", "store", "git", "repo-map", stored.Commit, "local-cache.txt")
+	if err := os.WriteFile(markerPath, []byte("preserve me\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(local-cache.txt) error = %v", err)
+	}
+
+	origRename := renameDir
+	t.Cleanup(func() {
+		renameDir = origRename
+	})
+
+	replaceAttempt := 0
+	storePath := filepath.Join(homeDir, ".ski", "store", "git", "repo-map", stored.Commit)
+	renameDir = func(oldpath, newpath string) error {
+		if newpath == storePath {
+			replaceAttempt++
+			if replaceAttempt == 1 {
+				return &os.LinkError{Op: "rename", Old: oldpath, New: newpath, Err: syscall.EPERM}
+			}
+		}
+		return origRename(oldpath, newpath)
+	}
+
+	_, err = RefreshGit(projectDir, homeDir, spec)
+	if err == nil {
+		t.Fatal("RefreshGit() error = nil, want replace failure")
+	}
+
+	data, err := os.ReadFile(markerPath)
+	if err != nil {
+		t.Fatalf("ReadFile(local-cache.txt) error = %v", err)
+	}
+	if string(data) != "preserve me\n" {
+		t.Fatalf("local-cache.txt = %q, want preserved marker", string(data))
+	}
+}
+
 func createMultiSkillRepoWithSharedFile(t *testing.T) string {
 	t.Helper()
 
