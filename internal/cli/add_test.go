@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -1280,7 +1279,7 @@ func TestAddRejectsInvalidSkillRepository(t *testing.T) {
 func TestAddMultiSkillRepoWithSkillFlags(t *testing.T) {
 	t.Parallel()
 
-	repoPath, commit := createMultiSkillRepo(t, "skill-pack", []multiSkillSpec{
+	repoPath, commit := createMultiSkillRepo(t, "skill-pack", []testutil.SkillSpec{
 		{Path: filepath.Join("skills", "alpha-skill"), Name: "alpha-skill"},
 		{Path: filepath.Join("skills", "beta-skill"), Name: "beta-skill"},
 	})
@@ -1352,7 +1351,7 @@ func TestAddMultiSkillRepoWithSkillFlags(t *testing.T) {
 func TestAddSupportsLegacySourceSelectors(t *testing.T) {
 	t.Parallel()
 
-	repoPath, _ := createMultiSkillRepo(t, "skill-pack", []multiSkillSpec{
+	repoPath, _ := createMultiSkillRepo(t, "skill-pack", []testutil.SkillSpec{
 		{Path: filepath.Join("skills", "alpha-skill"), Name: "alpha-skill"},
 		{Path: filepath.Join("skills", "beta-skill"), Name: "beta-skill"},
 	})
@@ -1400,7 +1399,7 @@ func TestAddSupportsLegacySourceSelectors(t *testing.T) {
 func TestAddMultiSkillRepoWithAll(t *testing.T) {
 	t.Parallel()
 
-	repoPath, _ := createMultiSkillRepo(t, "skill-pack", []multiSkillSpec{
+	repoPath, _ := createMultiSkillRepo(t, "skill-pack", []testutil.SkillSpec{
 		{Path: filepath.Join("skills", "alpha-skill"), Name: "alpha-skill"},
 		{Path: filepath.Join("skills", "beta-skill"), Name: "beta-skill"},
 	})
@@ -1440,7 +1439,7 @@ func TestAddMultiSkillRepoWithAll(t *testing.T) {
 func TestAddMultiSkillRepoRollsBackOnSecondSkillLinkConflict(t *testing.T) {
 	t.Parallel()
 
-	repoPath, _ := createMultiSkillRepo(t, "skill-pack", []multiSkillSpec{
+	repoPath, _ := createMultiSkillRepo(t, "skill-pack", []testutil.SkillSpec{
 		{Path: filepath.Join("skills", "alpha-skill"), Name: "alpha-skill"},
 		{Path: filepath.Join("skills", "beta-skill"), Name: "beta-skill"},
 	})
@@ -1510,7 +1509,7 @@ func TestAddMultiSkillRepoRollsBackOnSecondSkillLinkConflict(t *testing.T) {
 func TestAddMultiSkillRepoRequiresExplicitSelectionInNonTTY(t *testing.T) {
 	t.Parallel()
 
-	repoPath, _ := createMultiSkillRepo(t, "skill-pack", []multiSkillSpec{
+	repoPath, _ := createMultiSkillRepo(t, "skill-pack", []testutil.SkillSpec{
 		{Path: filepath.Join("skills", "alpha-skill"), Name: "alpha-skill"},
 		{Path: filepath.Join("skills", "beta-skill"), Name: "beta-skill"},
 	})
@@ -1542,7 +1541,7 @@ func TestAddMultiSkillRepoRequiresExplicitSelectionInNonTTY(t *testing.T) {
 func TestAddMultiSkillRepoPreservesBareURLInNonTTYGuidance(t *testing.T) {
 	t.Parallel()
 
-	repoPath, _ := createMultiSkillRepo(t, "skill-pack", []multiSkillSpec{
+	repoPath, _ := createMultiSkillRepo(t, "skill-pack", []testutil.SkillSpec{
 		{Path: filepath.Join("skills", "alpha-skill"), Name: "alpha-skill"},
 		{Path: filepath.Join("skills", "beta-skill"), Name: "beta-skill"},
 	})
@@ -1574,7 +1573,7 @@ func TestAddMultiSkillRepoPreservesBareURLInNonTTYGuidance(t *testing.T) {
 func TestAddMultiSkillRepoPromptsForSelectionOnTTY(t *testing.T) {
 	t.Parallel()
 
-	repoPath, commit := createMultiSkillRepo(t, "skill-pack", []multiSkillSpec{
+	repoPath, commit := createMultiSkillRepo(t, "skill-pack", []testutil.SkillSpec{
 		{Path: filepath.Join("skills", "alpha-skill"), Name: "alpha-skill"},
 		{Path: filepath.Join("skills", "beta-skill"), Name: "beta-skill"},
 	})
@@ -1714,63 +1713,12 @@ func createGitRepo(t *testing.T, repoName string, skillName string) (string, str
 	return repo.URL, repo.Commit
 }
 
-type multiSkillSpec struct {
-	Path string
-	Name string
-}
-
-func createMultiSkillRepo(t *testing.T, repoName string, specs []multiSkillSpec) (string, string) {
+func createMultiSkillRepo(t *testing.T, repoName string, specs []testutil.SkillSpec) (string, string) {
 	t.Helper()
 
-	repoSpecs := make([]testutil.SkillSpec, 0, len(specs))
-	for _, spec := range specs {
-		repoSpecs = append(repoSpecs, testutil.SkillSpec{Path: spec.Path, Name: spec.Name})
-	}
-	repo := testutil.NewMultiSkillRepo(t, repoName, repoSpecs)
+	repo := testutil.NewMultiSkillRepo(t, repoName, specs)
 	repoPathByURL.Store(repo.URL, repo.Path)
 	return repo.URL, repo.Commit
-}
-
-func writeSkillDir(t *testing.T, dir string, skillName string) {
-	t.Helper()
-
-	if err := os.MkdirAll(filepath.Join(dir, "tools"), 0o755); err != nil {
-		t.Fatalf("MkdirAll() error = %v", err)
-	}
-	skillDoc := `---
-name: ` + skillName + `
-description: Builds a repository map. Use when the user asks for codebase structure or repository summaries.
----
-
-# ` + skillName + `
-`
-	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(skillDoc), 0o644); err != nil {
-		t.Fatalf("WriteFile(SKILL.md) error = %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "tools", "helper.sh"), []byte("echo helper\n"), 0o755); err != nil {
-		t.Fatalf("WriteFile(helper.sh) error = %v", err)
-	}
-}
-
-func runGit(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %v error = %v\n%s", args, err, string(output))
-	}
-}
-
-func runGitOutput(t *testing.T, dir string, args ...string) string {
-	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %v error = %v\n%s", args, err, string(output))
-	}
-	return string(output)
 }
 
 func repoPathForURL(t *testing.T, repoURL string) string {
