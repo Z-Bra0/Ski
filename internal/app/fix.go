@@ -97,7 +97,7 @@ func (s Service) fixSkillGroup(doc *manifest.Manifest, nextLock *lockfile.Lockfi
 		lockChanged = lockChanged || changed
 		state = buildFixSkillState(doc, nextLock, group.name)
 	} else {
-		changed := repairOrphanedLockEntry(nextLock, findings, results, group.findingIndexes)
+		changed := s.repairOrphanedLockEntry(state, nextLock, findings, results, group.findingIndexes)
 		lockChanged = lockChanged || changed
 		return lockChanged, nil
 	}
@@ -128,15 +128,27 @@ func buildFixSkillState(doc *manifest.Manifest, lf *lockfile.Lockfile, skillName
 	return state
 }
 
-func repairOrphanedLockEntry(nextLock *lockfile.Lockfile, findings []DoctorFinding, results []FixResult, indexes []int) bool {
+func (s Service) repairOrphanedLockEntry(state fixSkillState, nextLock *lockfile.Lockfile, findings []DoctorFinding, results []FixResult, indexes []int) bool {
 	changed := false
 	for _, idx := range indexes {
 		if findings[idx].Kind != FindingKindOrphanedLockEntry {
 			continue
 		}
+		if state.hasLock {
+			for _, targetName := range state.lockEntry.Targets {
+				if err := s.removeAll([]string{targetName}, findings[idx].Skill); err != nil {
+					results[idx].Err = err
+					results[idx].Note = "failed to remove orphaned target installs; lockfile entry unchanged"
+					continue
+				}
+			}
+			if results[idx].Err != nil {
+				continue
+			}
+		}
 		nextLock.Skills = removeByName(nextLock.Skills, findings[idx].Skill, func(skill lockfile.Skill) string { return skill.Name })
 		results[idx].Fixed = true
-		results[idx].Note = "removed orphaned lockfile entry"
+		results[idx].Note = "removed orphaned lockfile entry and target installs"
 		changed = true
 	}
 	return changed

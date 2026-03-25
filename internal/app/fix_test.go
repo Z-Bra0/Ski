@@ -188,6 +188,11 @@ func TestFixRepairsOrphanedLockEntry(t *testing.T) {
 		t.Fatalf("results = %#v, want orphaned lock entry fixed", results)
 	}
 
+	targetPath := filepath.Join(projectDir, ".claude", "skills", "repo-map")
+	if _, err := os.Stat(targetPath); !os.IsNotExist(err) {
+		t.Fatalf("orphaned target stat error = %v, want not exist", err)
+	}
+
 	lf, err := lockfile.ReadFile(lockfile.Path(projectDir))
 	if err != nil {
 		t.Fatalf("ReadFile(lockfile) error = %v", err)
@@ -197,6 +202,51 @@ func TestFixRepairsOrphanedLockEntry(t *testing.T) {
 	}
 
 	requireNoDoctorFindings(t, svc)
+}
+
+func TestFixKeepsOrphanedLockEntryVisibleWhenTargetRemovalFails(t *testing.T) {
+	t.Parallel()
+
+	svc, _, projectDir, homeDir := setupInstalledSkillFixture(t, []string{"claude"})
+	writeManifestDoc(t, projectDir, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills:  []manifest.Skill{},
+	})
+
+	svc = Service{
+		ProjectDir: projectDir,
+		HomeDir:    homeDir,
+		removeAllFn: func(targets []string, name string) error {
+			return fmt.Errorf("forced orphan cleanup failure for %s", name)
+		},
+	}
+
+	findings := requireDoctorKinds(t, svc, FindingKindOrphanedLockEntry)
+	results := requireFixKinds(t, svc, findings, FindingKindOrphanedLockEntry)
+	result := requireResultByKind(t, results, FindingKindOrphanedLockEntry)
+	if result.Fixed {
+		t.Fatalf("result = %#v, want orphaned lock entry left unfixed", result)
+	}
+	if result.Err == nil {
+		t.Fatalf("result = %#v, want orphaned cleanup error", result)
+	}
+	if !strings.Contains(result.Note, "unchanged") {
+		t.Fatalf("result = %#v, want unchanged note", result)
+	}
+
+	targetPath := filepath.Join(projectDir, ".claude", "skills", "repo-map")
+	assertInstalledSkillDir(t, targetPath)
+
+	lf, err := lockfile.ReadFile(lockfile.Path(projectDir))
+	if err != nil {
+		t.Fatalf("ReadFile(lockfile) error = %v", err)
+	}
+	if len(lf.Skills) != 1 || lf.Skills[0].Name != "repo-map" {
+		t.Fatalf("lockfile skills = %#v, want orphaned entry preserved", lf.Skills)
+	}
+
+	requireDoctorKinds(t, svc, FindingKindOrphanedLockEntry)
 }
 
 func TestFixRepairsUpstreamMismatch(t *testing.T) {
