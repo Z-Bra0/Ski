@@ -6,6 +6,7 @@ GO_SOURCES := $(shell find cmd internal -name '*.go')
 BUILD_INPUTS := $(GO_SOURCES) go.mod go.sum Makefile
 VERSION_STAMP := dist/.version-$(VERSION)
 LDFLAGS := -X github.com/Z-Bra0/Ski/internal/buildinfo.Version=$(VERSION)
+RELEASE_LDFLAGS := -s -w $(LDFLAGS)
 RELEASE_PLATFORMS := darwin-arm64 darwin-amd64 linux-amd64 linux-arm64
 RELEASE_ARCHIVES := $(foreach platform,$(RELEASE_PLATFORMS),dist/ski_$(VERSION)_$(subst -,_,$(platform)).tar.gz)
 CHECKSUMS_FILE := dist/ski_$(VERSION)_checksums.txt
@@ -61,7 +62,7 @@ release-linux-arm64: assert-release-version $(BUILD_INPUTS)
 define build_release
 	rm -rf dist/ski_$(VERSION)_$(1)_$(2)
 	mkdir -p dist/ski_$(VERSION)_$(1)_$(2)
-	GOOS=$(1) GOARCH=$(2) go build -ldflags "$(LDFLAGS)" -o dist/ski_$(VERSION)_$(1)_$(2)/ski ./cmd/ski
+	GOOS=$(1) GOARCH=$(2) go build -trimpath -ldflags "$(RELEASE_LDFLAGS)" -o dist/ski_$(VERSION)_$(1)_$(2)/ski ./cmd/ski
 	cp LICENSE dist/ski_$(VERSION)_$(1)_$(2)/
 	tar -czf dist/ski_$(VERSION)_$(1)_$(2).tar.gz -C dist ski_$(VERSION)_$(1)_$(2)
 endef
