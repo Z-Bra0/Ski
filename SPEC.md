@@ -39,13 +39,13 @@ Reference spec: <https://agentskills.io/specification>
 
 ## Source Specifiers
 
-MVP accepts canonical `git:<url>` sources plus bare URL-form remote git sources such as `https://...`, `ssh://...`, and `git://...`, with optional `@<tag-or-commit>`.
+MVP accepts canonical `git:<url>` sources plus bare URL-form remote git sources such as `https://...`, `ssh://...`, and `git://...`, with optional `@<simple-ref>`.
 
 | Adapter | Format | Example |
 |---------|--------|---------|
 | `git` | `git:<url>[@ref]` or bare URL-form git source | `https://github.com/org/skill-pack.git@a1b2c3d` |
 
-`@ref` is optional. When omitted, resolves to default branch HEAD. `ref` can be a tag or a commit SHA.
+`@ref` is optional. When omitted, resolves to the remote default branch via `HEAD`. `ref` may be a simple branch name, tag name, or commit SHA. Refs containing `/` are currently unsupported.
 
 Bare URL-form git sources are normalized back to canonical `git:` strings when `ski.toml` and `ski.lock.json` are written. Local filesystem repositories are not supported as manifest sources.
 
@@ -207,6 +207,8 @@ If `--target <name>` is provided, `ski add` writes those targets onto each added
 
 If the selected skill already exists in the active manifest with the same identity, `ski add --target ...` extends that existing skill into the requested additional targets instead of failing as a duplicate.
 
+If the selected skill already exists in the active manifest with the same repository URL and `upstream_skill`, `ski add` updates that existing skill in place even when the ref changes. The existing local skill name is preserved. If `--target` is provided, those targets are unioned into the existing skill.
+
 If no `--skill` is provided and the repository contains exactly one skill, `ski add` adds that skill automatically.
 
 If no `--skill` is provided and the repository contains multiple skills:
@@ -266,6 +268,14 @@ No args: updates all skills to latest commit, rewrites lockfile.
 `ski update <skill>`: updates one skill.
 
 `ski update --check`: dry run — reports outdated skills without changing anything.
+
+`ski update --check` prints a compact table with:
+
+- `NAME` — local skill name
+- `TRACKING` — explicit manifest ref, or the remote default branch name when the source omits `@ref`
+- `CURRENT` — current locked commit short SHA, or `(none)` when no lock entry exists yet
+- `LATEST` — latest resolved commit short SHA
+- `LATEST_AT` — latest resolved commit date in `YYYY-MM-DD`
 
 ### `ski remove <skill>`
 

@@ -67,7 +67,30 @@ ski add https://github.com/org/repo-map.git
 
 This keeps one stored snapshot of the skill and materializes matching copies into both `.claude/skills` and `.codex/skills`.
 
-Pin a team audit skill to a specific commit:
+Install from the remote default branch:
+
+```bash
+ski init --target claude
+ski add https://github.com/org/repo-map.git
+```
+
+When no ref is specified, `ski add`, `ski install`, and `ski update --check` track the remote default branch via `HEAD`.
+
+Install from an explicit branch:
+
+```bash
+ski init --target claude
+ski add git:https://github.com/org/repo-map.git@main
+```
+
+Install from an explicit tag:
+
+```bash
+ski init --target claude
+ski add git:https://github.com/org/repo-map.git@v1.2.3
+```
+
+Install from an explicit commit:
 
 ```bash
 ski init --target claude
@@ -75,6 +98,14 @@ ski add git:https://github.com/acme/team-audit-skill.git@9f3c2ab
 ```
 
 This makes the project reproducible because the manifest and lockfile keep the selected source and resolved revision explicit.
+
+Switch an existing skill to a new branch, tag, or commit:
+
+```bash
+ski add git:https://github.com/acme/team-audit-skill.git@v1.3.0
+```
+
+If the repo URL and upstream skill already exist in the manifest, `ski add` updates that existing skill in place, rewrites the lock entry, and replaces the installed target copies safely.
 
 Restore skills from the manifest and lockfile in a fresh clone:
 
@@ -125,6 +156,7 @@ ski version
 - `ski remove --target ...` removes a skill only from those targets. Without `--target`, `remove` deletes the skill entry entirely.
 - `ski doctor --fix` repairs safe issues such as missing lockfile entries, missing target installs, stale lockfile fields, missing store snapshots, and drifted target directories. It exits non-zero if any issues remain after the repair pass.
 - `ski list` shows 1-based skill references like `@1`. Those references are scope-local and can be used with `info`, `update`, `remove`, and `add @N --target ...`.
+- `ski update --check` prints `NAME`, `TRACKING`, `CURRENT`, `LATEST`, and `LATEST_AT` so you can see which ref is being checked and when the latest commit landed.
 - Supported sources are remote Git endpoints. You can use `git:https://...` or omit the `git:` prefix for URL-form sources such as `https://...`, `ssh://...`, and `git://...`.
 - `ski version` reports the CLI build version. Dev builds print `dev`; release builds use the version passed to `make release VERSION=...`.
 - `make release VERSION=...` also writes `dist/ski_<version>_checksums.txt` for installer verification.
