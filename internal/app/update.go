@@ -15,8 +15,10 @@ import (
 // UpdateInfo reports the current and latest commit for one skill update check.
 type UpdateInfo struct {
 	Name          string
+	Tracking      string
 	CurrentCommit string
 	LatestCommit  string
+	LatestAt      string
 }
 
 type plannedUpdate struct {
@@ -51,7 +53,7 @@ func (s Service) CheckUpdates(name string) ([]UpdateInfo, error) {
 		if err != nil {
 			return nil, fmt.Errorf("skill %q: %w", mSkill.Name, err)
 		}
-		latestCommit, pinned, err := resolveUpdateCommit(s.sourceResolveDir(), src)
+		resolved, pinned, err := resolveUpdateInfo(s.sourceResolveDir(), src)
 		if err != nil {
 			return nil, fmt.Errorf("skill %q: %w", mSkill.Name, err)
 		}
@@ -64,14 +66,16 @@ func (s Service) CheckUpdates(name string) ([]UpdateInfo, error) {
 			currentCommit = locked.Commit
 		}
 
-		if currentCommit == latestCommit {
+		if currentCommit == resolved.Commit {
 			continue
 		}
 
 		updates = append(updates, UpdateInfo{
 			Name:          mSkill.Name,
+			Tracking:      resolved.Tracking,
 			CurrentCommit: currentCommit,
-			LatestCommit:  latestCommit,
+			LatestCommit:  resolved.Commit,
+			LatestAt:      resolved.LatestAt,
 		})
 	}
 
@@ -104,7 +108,7 @@ func (s Service) Update(name string) ([]UpdateInfo, error) {
 		if err != nil {
 			return nil, fmt.Errorf("skill %q: %w", mSkill.Name, err)
 		}
-		latestCommit, pinned, err := resolveUpdateCommit(s.sourceResolveDir(), src)
+		resolved, pinned, err := resolveUpdateInfo(s.sourceResolveDir(), src)
 		if err != nil {
 			return nil, fmt.Errorf("skill %q: %w", mSkill.Name, err)
 		}
@@ -113,7 +117,7 @@ func (s Service) Update(name string) ([]UpdateInfo, error) {
 		}
 
 		locked, hasLock := findLockSkill(lf.Skills, mSkill.Name)
-		if hasLock && locked.Commit == latestCommit {
+		if hasLock && locked.Commit == resolved.Commit {
 			continue
 		}
 
@@ -130,7 +134,7 @@ func (s Service) Update(name string) ([]UpdateInfo, error) {
 			previousStorePath = previousStored.Path
 		}
 
-		src.Ref = latestCommit
+		src.Ref = resolved.Commit
 		stored, err := store.EnsureGit(s.sourceResolveDir(), s.HomeDir, src, mSkill.Name)
 		if err != nil {
 			return nil, fmt.Errorf("skill %q: %w", mSkill.Name, err)
@@ -160,8 +164,10 @@ func (s Service) Update(name string) ([]UpdateInfo, error) {
 		})
 		updates = append(updates, UpdateInfo{
 			Name:          mSkill.Name,
+			Tracking:      resolved.Tracking,
 			CurrentCommit: locked.Commit,
 			LatestCommit:  stored.Commit,
+			LatestAt:      resolved.LatestAt,
 		})
 	}
 
@@ -360,13 +366,13 @@ func cleanupBackups(plans []plannedUpdate) {
 	}
 }
 
-func resolveUpdateCommit(projectDir string, src source.Git) (string, bool, error) {
-	commit, err := source.ResolveGit(projectDir, src)
+func resolveUpdateInfo(projectDir string, src source.Git) (source.ResolveInfo, bool, error) {
+	info, err := source.ResolveGitInfo(projectDir, src)
 	if err == nil {
-		return commit, false, nil
+		return info, false, nil
 	}
 	if src.Ref != "" && source.IsCommitRef(src.Ref) && source.IsNoMatchingRevision(err) {
-		return "", true, nil
+		return source.ResolveInfo{}, true, nil
 	}
-	return "", false, err
+	return source.ResolveInfo{}, false, err
 }

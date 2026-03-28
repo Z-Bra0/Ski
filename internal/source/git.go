@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"os/exec"
 	"path"
 	"regexp"
@@ -40,6 +41,13 @@ type Git struct {
 	URL    string
 	Ref    string
 	Skills []string
+}
+
+// ResolveInfo describes a resolved git revision with display metadata.
+type ResolveInfo struct {
+	Commit   string
+	Tracking string
+	LatestAt string
 }
 
 // ParseGit parses a canonical git: source or a bare remote git URL.
@@ -295,6 +303,121 @@ func ResolveGit(dir string, spec Git) (string, error) {
 	return "", NoMatchingRevisionError{Ref: refLabel}
 }
 
+// ResolveGitInfo resolves the source to a concrete commit plus tracking metadata.
+func ResolveGitInfo(dir string, spec Git) (ResolveInfo, error) {
+	if spec.Ref == "" {
+		tracking, commit, err := resolveGitHEAD(dir, spec.URL)
+		if err != nil {
+			return ResolveInfo{}, err
+		}
+		latestAt, err := resolveGitCommitDate(spec.URL, commit, commit)
+		if err != nil {
+			return ResolveInfo{}, err
+		}
+		return ResolveInfo{
+			Commit:   commit,
+			Tracking: tracking,
+			LatestAt: latestAt,
+		}, nil
+	}
+
+	commit, err := ResolveGit(dir, spec)
+	if err == nil {
+		latestAt, err := resolveGitCommitDate(spec.URL, commit, spec.Ref)
+		if err != nil {
+			return ResolveInfo{}, err
+		}
+		return ResolveInfo{
+			Commit:   commit,
+			Tracking: spec.Ref,
+			LatestAt: latestAt,
+		}, nil
+	}
+	if !IsCommitRef(spec.Ref) {
+		return ResolveInfo{}, err
+	}
+
+	latestAt, err := resolveGitCommitDate(spec.URL, spec.Ref, spec.Ref)
+	if err != nil {
+		return ResolveInfo{}, err
+	}
+	return ResolveInfo{
+		Commit:   spec.Ref,
+		Tracking: spec.Ref,
+		LatestAt: latestAt,
+	}, nil
+}
+
+func resolveGitHEAD(dir, rawURL string) (tracking string, commit string, err error) {
+	cmd := exec.Command("git", "ls-remote", "--symref", rawURL, "HEAD")
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", "", fmt.Errorf("%s", strings.TrimSpace(string(output)))
+	}
+
+	tracking = "HEAD"
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	for _, line := range lines {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[0] == "ref:" {
+			tracking = strings.TrimPrefix(fields[1], "refs/heads/")
+			continue
+		}
+		if len(fields) >= 2 && fields[1] == "HEAD" && fields[0] != "" {
+			commit = fields[0]
+		}
+	}
+	if commit == "" {
+		return "", "", NoMatchingRevisionError{Ref: "HEAD"}
+	}
+	return tracking, commit, nil
+}
+
+func resolveGitCommitDate(rawURL, commit, refLabel string) (string, error) {
+	tempDir, err := os.MkdirTemp("", "ski-git-resolve-*")
+	if err != nil {
+		return "", fmt.Errorf("create temp git dir: %w", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	initCmd := exec.Command("git", "init", "--quiet")
+	initCmd.Dir = tempDir
+	if output, err := initCmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("%s", strings.TrimSpace(string(output)))
+	}
+
+	fetchCmd := exec.Command("git", "fetch", "--quiet", "--depth=1", rawURL, commit)
+	fetchCmd.Dir = tempDir
+	if output, err := fetchCmd.CombinedOutput(); err != nil {
+		if noMatchingRevisionFromOutput(string(output)) {
+			return "", NoMatchingRevisionError{Ref: refLabel}
+		}
+		return "", fmt.Errorf("%s", strings.TrimSpace(string(output)))
+	}
+
+	showCmd := exec.Command("git", "show", "-s", "--format=%cs", "FETCH_HEAD")
+	showCmd.Dir = tempDir
+	output, err := showCmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("%s", strings.TrimSpace(string(output)))
+	}
+
+	latestAt := strings.TrimSpace(string(output))
+	if latestAt == "" {
+		return "", fmt.Errorf("resolve %q: missing commit date", commit)
+	}
+	return latestAt, nil
+}
+
+func noMatchingRevisionFromOutput(output string) bool {
+	output = strings.ToLower(output)
+	return strings.Contains(output, "couldn't find remote ref") ||
+		strings.Contains(output, "no such remote ref") ||
+		strings.Contains(output, "not our ref") ||
+		strings.Contains(output, "unadvertised object")
+}
+
 // IsCommitRef reports whether ref looks like a raw commit SHA.
 func IsCommitRef(ref string) bool {
 	return commitRefPattern.MatchString(ref)
@@ -309,6 +432,12 @@ func (g Git) WithSkills(skills []string) Git {
 // WithoutSkills returns a copy of g with any upstream skill selectors removed.
 func (g Git) WithoutSkills() Git {
 	g.Skills = nil
+	return g
+}
+
+// WithoutRef returns a copy of g with any explicit ref removed.
+func (g Git) WithoutRef() Git {
+	g.Ref = ""
 	return g
 }
 

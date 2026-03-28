@@ -327,6 +327,96 @@ func TestResolveGitReturnsTypedNoMatchingRevisionError(t *testing.T) {
 	}
 }
 
+func TestResolveGitInfoDefaultBranchReportsTrackingAndDate(t *testing.T) {
+	t.Parallel()
+
+	repo := testutil.NewSkillRepo(t, "repo-map", "repo-map")
+
+	info, err := ResolveGitInfo(repo.Path, Git{URL: repo.URL})
+	if err != nil {
+		t.Fatalf("ResolveGitInfo() error = %v", err)
+	}
+
+	wantTracking := strings.TrimSpace(testutil.RunGitOutput(t, repo.Path, "symbolic-ref", "--short", "HEAD"))
+	if info.Tracking != wantTracking {
+		t.Fatalf("ResolveGitInfo().Tracking = %q, want %q", info.Tracking, wantTracking)
+	}
+	if info.Commit != repo.Commit {
+		t.Fatalf("ResolveGitInfo().Commit = %q, want %q", info.Commit, repo.Commit)
+	}
+
+	wantDate := strings.TrimSpace(testutil.RunGitOutput(t, repo.Path, "show", "-s", "--format=%cs", "HEAD"))
+	if info.LatestAt != wantDate {
+		t.Fatalf("ResolveGitInfo().LatestAt = %q, want %q", info.LatestAt, wantDate)
+	}
+}
+
+func TestResolveGitInfoDefaultBranchPreservesSlashInTracking(t *testing.T) {
+	t.Parallel()
+
+	repo := testutil.NewSkillRepo(t, "repo-map", "repo-map")
+	testutil.RunGit(t, repo.Path, "branch", "-m", "release/2026-q1")
+
+	info, err := ResolveGitInfo(repo.Path, Git{URL: repo.URL})
+	if err != nil {
+		t.Fatalf("ResolveGitInfo() error = %v", err)
+	}
+
+	if info.Tracking != "release/2026-q1" {
+		t.Fatalf("ResolveGitInfo().Tracking = %q, want %q", info.Tracking, "release/2026-q1")
+	}
+}
+
+func TestResolveGitInfoExplicitRefReportsTrackingAndDate(t *testing.T) {
+	t.Parallel()
+
+	repo := testutil.NewSkillRepo(t, "repo-map", "repo-map")
+
+	tests := []struct {
+		name string
+		ref  string
+	}{
+		{
+			name: "branch",
+			ref:  strings.TrimSpace(testutil.RunGitOutput(t, repo.Path, "symbolic-ref", "--short", "HEAD")),
+		},
+		{
+			name: "tag",
+			ref:  "v1.0.0",
+		},
+		{
+			name: "commit",
+			ref:  repo.Commit,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			info, err := ResolveGitInfo(repo.Path, Git{
+				URL: repo.URL,
+				Ref: tc.ref,
+			})
+			if err != nil {
+				t.Fatalf("ResolveGitInfo() error = %v", err)
+			}
+			if info.Tracking != tc.ref {
+				t.Fatalf("ResolveGitInfo().Tracking = %q, want %q", info.Tracking, tc.ref)
+			}
+			if info.Commit == "" {
+				t.Fatal("ResolveGitInfo().Commit = empty, want resolved commit")
+			}
+
+			wantDate := strings.TrimSpace(testutil.RunGitOutput(t, repo.Path, "show", "-s", "--format=%cs", info.Commit))
+			if info.LatestAt != wantDate {
+				t.Fatalf("ResolveGitInfo().LatestAt = %q, want %q", info.LatestAt, wantDate)
+			}
+		})
+	}
+}
+
 func equalStrings(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

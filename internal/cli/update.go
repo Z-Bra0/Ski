@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 )
@@ -39,12 +40,19 @@ func newUpdateCmd(opts Options) *cobra.Command {
 					fmt.Fprintln(cmd.OutOrStdout(), "all skills up to date")
 					return nil
 				}
+				w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+				fmt.Fprintln(w, "NAME\tTRACKING\tCURRENT\tLATEST\tLATEST_AT")
 				for _, update := range updates {
-					fmt.Fprintf(cmd.OutOrStdout(), "%s %s -> %s\n",
+					fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
 						update.Name,
+						update.Tracking,
 						shortCommit(update.CurrentCommit),
 						shortCommit(update.LatestCommit),
+						update.LatestAt,
 					)
+				}
+				if err := w.Flush(); err != nil {
+					return err
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "%d skills can be updated\n", len(updates))
 				return nil
