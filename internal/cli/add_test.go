@@ -1179,7 +1179,7 @@ func TestAddRejectsDuplicateDerivedName(t *testing.T) {
 	}
 }
 
-func TestAddRejectsDuplicateSource(t *testing.T) {
+func TestAddUpdatesExistingSourceMatchInPlace(t *testing.T) {
 	t.Parallel()
 
 	repoPath, _ := createGitRepo(t, "repo-map", "repo-map")
@@ -1207,14 +1207,30 @@ func TestAddRejectsDuplicateSource(t *testing.T) {
 		Stdout:     &bytes.Buffer{},
 		Stderr:     &bytes.Buffer{},
 	})
-	cmd.SetArgs([]string{"add", "git:" + repoPath + "@v1.0.0##repo-map"})
+	newCommit := advanceGitRepo(t, repoPathForURL(t, repoPath), "repo-map", "second")
+	cmd.SetArgs([]string{"add", "git:" + repoPath + "@" + newCommit + "##repo-map"})
 
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("Execute() error = nil, want error")
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
 	}
-	if !strings.Contains(err.Error(), `source "git:`) || !strings.Contains(err.Error(), "already exists as skill") {
-		t.Fatalf("Execute() error = %v, want duplicate source error", err)
+
+	gotDoc, err := manifest.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(manifest) error = %v", err)
+	}
+	want := manifest.Manifest{
+		Version: 1,
+		Targets: []string{},
+		Skills: []manifest.Skill{
+			{
+				Name:          "existing-skill",
+				Source:        "git:" + repoPath + "@" + newCommit,
+				UpstreamSkill: "repo-map",
+			},
+		},
+	}
+	if !reflect.DeepEqual(*gotDoc, want) {
+		t.Fatalf("manifest = %#v, want %#v", *gotDoc, want)
 	}
 }
 
