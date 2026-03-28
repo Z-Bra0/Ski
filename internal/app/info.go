@@ -118,8 +118,6 @@ func (s Service) inspectTargetLink(targetName, skillName, expectedStorePath, sto
 		info.Status = targetStatusInstalled
 	case targetStatusMissing:
 		info.Status = targetStatusMissing
-	case targetStatusLegacySymlink:
-		info.Status = targetStatusLegacySymlink
 	case targetStatusDrifted:
 		info.Status = targetStatusDrifted
 	default:

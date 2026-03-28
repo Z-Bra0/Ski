@@ -256,8 +256,6 @@ func (s Service) planUpdateTargetChanges(skillName string, desiredTargets []stri
 				})
 				continue
 			}
-		case targetStatusLegacySymlink:
-			return nil, legacySymlinkInstallError(inspection.Path)
 		case targetStatusDrifted:
 			return nil, driftedTargetError(inspection.Path)
 		default:

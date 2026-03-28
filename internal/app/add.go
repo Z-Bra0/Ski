@@ -326,8 +326,6 @@ func (s Service) preflightAddTargets(targets []string, name, storePath string) (
 			installTargets = append(installTargets, targetName)
 		case targetStatusInstalled:
 			continue
-		case targetStatusLegacySymlink:
-			return nil, legacySymlinkInstallError(inspection.Path)
 		case targetStatusDrifted:
 			return nil, driftedTargetError(inspection.Path)
 		default:

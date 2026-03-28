@@ -23,7 +23,6 @@ const (
 	FindingKindMissingTargetInstall = "missing_target_install"
 	FindingKindDriftedTarget        = "drifted_target"
 	FindingKindUnexpectedTarget     = "unexpected_target"
-	FindingKindLegacySymlink        = "legacy_symlink"
 	FindingKindUnexpectedEntryType  = "unexpected_entry_type"
 )
 
@@ -233,14 +232,6 @@ func (s Service) doctorTargetFindings(skillName, targetName, storePath string, s
 			Kind:       FindingKindDriftedTarget,
 			Skill:      skillName,
 			Message:    driftedTargetError(inspection.Path).Error(),
-			TargetName: targetName,
-			StorePath:  storePath,
-		}}
-	case targetStatusLegacySymlink:
-		return []DoctorFinding{{
-			Kind:       FindingKindLegacySymlink,
-			Skill:      skillName,
-			Message:    legacySymlinkInstallError(inspection.Path).Error(),
 			TargetName: targetName,
 			StorePath:  storePath,
 		}}

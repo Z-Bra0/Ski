@@ -151,8 +151,6 @@ func (s Service) planRemoveTargetChanges(targets []string, name, previousStorePa
 				})
 				continue
 			}
-		case targetStatusLegacySymlink:
-			return nil, legacySymlinkInstallError(inspection.Path)
 		case targetStatusDrifted:
 			return nil, driftedTargetError(inspection.Path)
 		case targetStatusUnexpectedEntry:

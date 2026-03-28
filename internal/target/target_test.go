@@ -162,7 +162,7 @@ func TestMaterializeRejectsNonDirectory(t *testing.T) {
 	}
 }
 
-func TestMaterializeRejectsLegacySymlink(t *testing.T) {
+func TestMaterializeRejectsSymlinkEntryAsNonDirectory(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -176,10 +176,10 @@ func TestMaterializeRejectsLegacySymlink(t *testing.T) {
 
 	err := target.Materialize(root, "claude", "my-skill", writeStoreSkill(t, t.TempDir(), "my-skill", "alpha"))
 	if err == nil {
-		t.Fatal("Materialize() error = nil, want legacy symlink error")
+		t.Fatal("Materialize() error = nil, want non-directory error")
 	}
-	if !strings.Contains(err.Error(), "legacy symlink install") {
-		t.Fatalf("Materialize() error = %v, want legacy symlink error", err)
+	if !strings.Contains(err.Error(), "not a directory") {
+		t.Fatalf("Materialize() error = %v, want non-directory error", err)
 	}
 }
 
@@ -351,7 +351,7 @@ func TestReplaceSwapsInstalledDirectory(t *testing.T) {
 	assertInstalledSkill(t, claudeLink(root, "my-skill"), "beta")
 }
 
-func TestReplaceRejectsLegacySymlink(t *testing.T) {
+func TestReplaceRejectsSymlinkEntryAsNonDirectory(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -365,10 +365,10 @@ func TestReplaceRejectsLegacySymlink(t *testing.T) {
 
 	err := target.Replace(root, "claude", "my-skill", writeStoreSkill(t, t.TempDir(), "my-skill", "alpha"))
 	if err == nil {
-		t.Fatal("Replace() error = nil, want legacy symlink error")
+		t.Fatal("Replace() error = nil, want non-directory error")
 	}
-	if !strings.Contains(err.Error(), "legacy symlink install") {
-		t.Fatalf("Replace() error = %v, want legacy symlink error", err)
+	if !strings.Contains(err.Error(), "not a directory") {
+		t.Fatalf("Replace() error = %v, want non-directory error", err)
 	}
 }
 
@@ -419,7 +419,7 @@ func TestRemoveRejectsNonDirectory(t *testing.T) {
 	}
 }
 
-func TestRemoveRejectsLegacySymlink(t *testing.T) {
+func TestRemoveRejectsSymlinkEntryAsNonDirectory(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -433,10 +433,10 @@ func TestRemoveRejectsLegacySymlink(t *testing.T) {
 
 	err := target.Remove(root, "claude", "my-skill")
 	if err == nil {
-		t.Fatal("Remove() error = nil, want legacy symlink error")
+		t.Fatal("Remove() error = nil, want non-directory error")
 	}
-	if !strings.Contains(err.Error(), "legacy symlink install") {
-		t.Fatalf("Remove() error = %v, want legacy symlink error", err)
+	if !strings.Contains(err.Error(), "not a directory") {
+		t.Fatalf("Remove() error = %v, want non-directory error", err)
 	}
 }
 

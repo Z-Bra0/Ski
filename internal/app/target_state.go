@@ -13,7 +13,6 @@ const (
 	targetStatusMissing          = "missing"
 	targetStatusInstalled        = "installed"
 	targetStatusDrifted          = "drifted"
-	targetStatusLegacySymlink    = "legacy symlink"
 	targetStatusUnexpectedEntry  = "unexpected entry"
 	targetStatusStoreUnavailable = "store unavailable"
 )
@@ -36,8 +35,6 @@ func (s Service) inspectTarget(targetName, skillName, expectedPath string) (targ
 		return targetInspection{Path: entryPath, Status: targetStatusMissing}, nil
 	case err != nil:
 		return targetInspection{}, fmt.Errorf("lstat %s: %w", entryPath, err)
-	case info.Mode()&os.ModeSymlink != 0:
-		return targetInspection{Path: entryPath, Status: targetStatusLegacySymlink}, nil
 	case !info.IsDir():
 		return targetInspection{Path: entryPath, Status: targetStatusUnexpectedEntry}, nil
 	case expectedPath == "":
@@ -64,10 +61,6 @@ func sameDirContents(left, right string) (bool, error) {
 		return false, err
 	}
 	return leftHash == rightHash, nil
-}
-
-func legacySymlinkInstallError(path string) error {
-	return fmt.Errorf("legacy symlink install at %s is unsupported; remove it and reinstall the skill", path)
 }
 
 func driftedTargetError(path string) error {

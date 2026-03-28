@@ -101,7 +101,7 @@ func TestFixRepairsInvalidStoreSnapshot(t *testing.T) {
 	requireNoDoctorFindings(t, svc)
 }
 
-func TestFixSkipsLegacySymlink(t *testing.T) {
+func TestFixSkipsUnexpectedSymlinkEntry(t *testing.T) {
 	t.Parallel()
 
 	svc, _, projectDir, _ := setupInstalledSkillFixture(t, []string{"claude"})
@@ -114,14 +114,14 @@ func TestFixSkipsLegacySymlink(t *testing.T) {
 		t.Fatalf("Symlink() error = %v", err)
 	}
 
-	findings := requireDoctorKinds(t, svc, FindingKindLegacySymlink)
-	results := requireFixKinds(t, svc, findings, FindingKindLegacySymlink)
-	result := requireResultByKind(t, results, FindingKindLegacySymlink)
+	findings := requireDoctorKinds(t, svc, FindingKindUnexpectedEntryType)
+	results := requireFixKinds(t, svc, findings, FindingKindUnexpectedEntryType)
+	result := requireResultByKind(t, results, FindingKindUnexpectedEntryType)
 	if result.Fixed || result.Note != "manual intervention required" {
 		t.Fatalf("result = %#v, want manual intervention note", result)
 	}
 
-	requireDoctorKinds(t, svc, FindingKindLegacySymlink)
+	requireDoctorKinds(t, svc, FindingKindUnexpectedEntryType)
 }
 
 func TestFixKeepsTargetsMismatchVisibleWhenUnexpectedTargetRemovalFails(t *testing.T) {
