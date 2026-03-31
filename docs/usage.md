@@ -101,8 +101,6 @@ Use `ski doctor --fix` to repair safe issues in place, including:
 
 `ski doctor --fix` exits non-zero if any issues still require manual intervention after the repair pass.
 
-Legacy symlink installs are unsupported. Remove them and reinstall the skill so the target directory is recreated as a copied install.
-
 ## Version and Release Notes
 
 `ski version` reports the CLI build version. Development builds print `dev`.
