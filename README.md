@@ -1,26 +1,21 @@
 # ski
 
-Managing AI agent skills across tools is still manual, duplicated, and hard to reproduce.
+Lightweight, Git-based toolkit for sharing agent skills across repos without copy-paste drift.
 
-Teams copy skill folders into `.claude/skills`, `.codex/skills`, and other agent directories by hand, then lose track of which repo, tag, or commit each project is actually using.
+`ski` helps teams reuse the same skills across multiple codebases while keeping installs reproducible and repo-aware.
 
-`ski` turns that into a package-manager workflow for agent skills. Install skills from Git into Claude, Codex, Cursor, and OpenClaw with a manifest, lockfile, and shared store-backed copied installs.
+## Best Fit
 
----
+- teams sharing skills across multiple repos
+- per-repo version pinning and restore
+- project-scoped or global installs
+- automation-friendly
 
-## Status
+## Not For
 
-- git repositories as skill sources
-- local and global scope
-- `init`, `add`, `install`, `remove`, `update`, `list`, `info`, and `doctor`
-
----
-
-## Limitations
-
-- Git-only sources
-- Trust is manual
-- No Windows support
+- skill registries
+- marketplaces
+- public skill discovery
 
 ---
 
@@ -45,9 +40,11 @@ curl -fsSL https://raw.githubusercontent.com/Z-Bra0/Ski/master/scripts/install.s
 
 ## Quick Start
 
+Adopt a shared skill in one repo:
+
 ```bash
 ski init --target claude
-ski add https://github.com/org/repo-map.git
+ski add git:https://github.com/anthropics/skills.git --skill skill-creator
 ```
 
 `ski add` is the first-time workflow: it updates `ski.toml`, resolves and writes `ski.lock.json`, fetches the skill into the store, and copies it into the configured targets.
@@ -56,79 +53,36 @@ Use `ski install` later to restore skills from `ski.toml` and `ski.lock.json`, f
 
 ---
 
-## Examples
+## Notes
 
-Share one `repo-map` skill across Claude and Codex:
-
-```bash
-ski init --target claude --target codex
-ski add https://github.com/org/repo-map.git
-```
-
-This keeps one stored snapshot of the skill and materializes matching copies into both `.claude/skills` and `.codex/skills`.
-
-Install from the remote default branch:
-
-```bash
-ski init --target claude
-ski add https://github.com/org/repo-map.git
-```
-
-When no ref is specified, `ski add`, `ski install`, and `ski update --check` track the remote default branch via `HEAD`.
-
-Install from an explicit branch:
-
-```bash
-ski init --target claude
-ski add git:https://github.com/org/repo-map.git@main
-```
-
-Install from an explicit tag:
-
-```bash
-ski init --target claude
-ski add git:https://github.com/org/repo-map.git@v1.2.3
-```
-
-Install from an explicit commit:
-
-```bash
-ski init --target claude
-ski add git:https://github.com/acme/team-audit-skill.git@9f3c2ab
-```
-
-This makes the project reproducible because the manifest and lockfile keep the selected source and resolved revision explicit.
-
-Switch an existing skill to a new branch, tag, or commit:
-
-```bash
-ski add git:https://github.com/acme/team-audit-skill.git@v1.3.0
-```
-
-If the repo URL and upstream skill already exist in the manifest, `ski add` updates that existing skill in place, rewrites the lock entry, and replaces the installed target copies safely.
-
-Restore skills from the manifest and lockfile in a fresh clone:
-
-```bash
-ski install
-```
+- Use `ski` only with skill repositories you have verified and trust.
+- `ski add` is for first-time add + lock + install. `ski install` restores from `ski.toml` and `ski.lock.json`.
+- Local installs write into the project. Use `-g` for global manifest and global target directories.
 
 ---
 
-## Build
+## Docs
 
-```bash
-make build                     # local dev build; `ski version` prints `dev`
-make release VERSION=0.2.1
-```
+- [docs/usage.md](docs/usage.md) — usage patterns, targets, refs, and troubleshooting
+- [SPEC.md](SPEC.md) — file formats, schemas, and adapter interfaces
+- [ARCHITECTURE.md](ARCHITECTURE.md) — internal design and Go layout
+- [DECISIONS.md](DECISIONS.md) — design decisions and rationale
 
 ---
 
-## Test
+## Status
 
-```bash
-make test
-```
+- git repositories as skill sources
+- local and global scope
+- `init`, `add`, `install`, `remove`, `update`, `list`, `info`, and `doctor`
+
+---
+
+## Limitations
+
+- Git-only sources
+- Trust is manual
+- No Windows support
 
 ---
 
@@ -148,29 +102,20 @@ ski version
 
 ---
 
-## Usage Notes
+## Build
 
-- Use `ski` only with skill repositories you have verified and trust. Review the upstream repo and `SKILL.md` before `add`, `install`, or `update`.
-- `ski add` prompts when a repo contains multiple skills. In non-interactive mode, use `--skill` or `--all`.
-- `ski add --target ...` writes a per-skill target override for new skills. If the skill already exists with the same identity, `add --target ...` extends it into those additional targets.
-- `ski remove --target ...` removes a skill only from those targets. Without `--target`, `remove` deletes the skill entry entirely.
-- `ski doctor --fix` repairs safe issues such as missing lockfile entries, missing target installs, stale lockfile fields, missing store snapshots, and drifted target directories. It exits non-zero if any issues remain after the repair pass.
-- `ski list` shows 1-based skill references like `@1`. Those references are scope-local and can be used with `info`, `update`, `remove`, and `add @N --target ...`.
-- `ski update --check` prints `NAME`, `TRACKING`, `CURRENT`, `LATEST`, and `LATEST_AT` so you can see which ref is being checked and when the latest commit landed.
-- Supported sources are remote Git endpoints. You can use `git:https://...` or omit the `git:` prefix for URL-form sources such as `https://...`, `ssh://...`, and `git://...`.
-- `ski version` reports the CLI build version. Dev builds print `dev`; release builds use the version passed to `make release VERSION=...`.
-- `make release VERSION=...` also writes `dist/ski_<version>_checksums.txt` for installer verification.
-- Local targets write into the project. `-g` uses `~/.ski/global.toml` and global agent directories instead.
-- Built-in targets include `cursor`, `claude`, `copilot`, `codex`, `windsurf`, `gemini`, `antigravity`, `opencode`, `openclaw`, `goose`, and `agents`.
-- Custom target folders use `dir:`. For example: `dir:./agent-skills/claude`.
+```bash
+make build                     # local dev build; `ski version` prints `dev`
+make release VERSION=0.2.1
+```
 
 ---
 
-## Docs
+## Test
 
-- [SPEC.md](SPEC.md) — file formats, schemas, adapter interfaces
-- [ARCHITECTURE.md](ARCHITECTURE.md) — internal design and Go layout
-- [DECISIONS.md](DECISIONS.md) — design decisions and rationale
+```bash
+make test
+```
 
 ---
 
