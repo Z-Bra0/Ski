@@ -389,8 +389,20 @@ func (s Service) commitAddPlans(
 			continue
 		}
 
-		appliedPlan, failure := s.applyTargetChangePlan(plan.targetChangesPlan(), targetChangePlansFromAdd(applied), func(applied []plannedTargetChanges) error {
-			return s.rollbackAddSelected(addPlansFromTargetChanges(applied), manifestPath, originalManifestData, lockPath, originalLockData, hadLockfile)
+		priorApplied := applied
+		appliedPlan, failure := s.applyTargetChangePlan(plan.targetChangesPlan(), targetChangePlansFromAdd(applied), func(innerApplied []plannedTargetChanges) error {
+			// innerApplied contains previously applied non-zero-change plans plus any
+			// partially applied changes from the current plan. Zero-change plans
+			// (materialized new skills) are not tracked in innerApplied, so we
+			// reconstruct the full list by prepending them from priorApplied.
+			all := make([]plannedAdd, 0, len(priorApplied)+len(innerApplied))
+			for _, p := range priorApplied {
+				if len(p.Changes) == 0 {
+					all = append(all, p)
+				}
+			}
+			all = append(all, addPlansFromTargetChanges(innerApplied)...)
+			return s.rollbackAddSelected(all, manifestPath, originalManifestData, lockPath, originalLockData, hadLockfile)
 		})
 		if failure != nil {
 			if failure.RollbackErr != nil {
