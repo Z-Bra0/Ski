@@ -58,6 +58,7 @@ Use `ski install` later to restore skills from `ski.toml` and `ski.lock.json`, f
 - Use `ski` only with skill repositories you have verified and trust.
 - `ski add` is for first-time add + lock + install. `ski install` restores from `ski.toml` and `ski.lock.json`.
 - Local installs write into the project. Use `-g` for global manifest and global target directories.
+- Use `ski disable <skill>` to keep tracking a skill without installing it into targets. Use `ski enable <skill>` to restore it later.
 
 ---
 
@@ -74,7 +75,7 @@ Use `ski install` later to restore skills from `ski.toml` and `ski.lock.json`, f
 
 - git repositories as skill sources
 - local and global scope
-- `init`, `add`, `install`, `remove`, `update`, `list`, `info`, and `doctor`
+- `init`, `add`, `install`, `remove`, `update`, `list`, `info`, `enable`, `disable`, and `doctor`
 
 ---
 
@@ -91,6 +92,8 @@ Use `ski install` later to restore skills from `ski.toml` and `ski.lock.json`, f
 ```bash
 ski init [-g]
 ski add [-g] [--target target]... <source>
+ski enable [-g] <skill>
+ski disable [-g] <skill>
 ski install [-g]
 ski list [-g]
 ski info [-g] <skill>
