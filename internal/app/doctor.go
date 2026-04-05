@@ -91,6 +91,7 @@ func (s Service) Doctor() ([]DoctorFinding, error) {
 func (s Service) doctorSkillFindings(doc *manifest.Manifest, skill manifest.Skill, locked lockfile.Skill) []DoctorFinding {
 	findings := make([]DoctorFinding, 0)
 	expectedTargets := effectiveTargetsForSkill(doc, skill)
+	installTargets := installTargetsForSkill(doc, skill)
 	targetsToInspect := unionStrings(expectedTargets, locked.Targets)
 
 	manifestSource, manifestUpstream, err := canonicalSkillIdentity(skill.Source, skill.UpstreamSkill)
@@ -160,7 +161,7 @@ func (s Service) doctorSkillFindings(doc *manifest.Manifest, skill manifest.Skil
 	}
 
 	for _, targetName := range targetsToInspect {
-		shouldExist := slices.Contains(expectedTargets, targetName)
+		shouldExist := slices.Contains(installTargets, targetName)
 		findings = append(findings, s.doctorTargetFindings(skill.Name, targetName, storePath, shouldExist)...)
 	}
 

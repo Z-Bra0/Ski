@@ -62,13 +62,14 @@ func (s Service) Install() (int, error) {
 		}
 
 		effectiveTargets := effectiveTargetsForSkill(doc, mSkill)
+		desiredTargets := installTargetsForSkill(doc, mSkill)
 		previousTargets := []string(nil)
 		previousPath := ""
 		if hasLock {
 			previousTargets = append(previousTargets, lockedEntry.Targets...)
 			previousPath = stored.Path
 		}
-		changes, err := s.planUpdateTargetChanges(mSkill.Name, effectiveTargets, previousTargets, previousPath, stored.Path)
+		changes, err := s.planUpdateTargetChanges(mSkill.Name, desiredTargets, previousTargets, previousPath, stored.Path)
 		if err != nil {
 			return 0, fmt.Errorf("skill %q: %w", mSkill.Name, err)
 		}

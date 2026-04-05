@@ -254,6 +254,10 @@ func (s Service) planExistingSkillAdd(
 	if len(targetOverride) > 0 {
 		desiredTargets = unionStrings(desiredTargets, targetOverride)
 	}
+	desiredInstallTargets := desiredTargets
+	if !skillEnabled(existing) {
+		desiredInstallTargets = nil
+	}
 
 	locked, hasLock := findLockSkill(nextLock.Skills, existing.Name)
 	previousTargets := []string(nil)
@@ -276,7 +280,7 @@ func (s Service) planExistingSkillAdd(
 	if err != nil {
 		return plannedAdd{}, nil, err
 	}
-	changes, err := s.planUpdateTargetChanges(existing.Name, desiredTargets, previousTargets, previousStorePath, stored.Path)
+	changes, err := s.planUpdateTargetChanges(existing.Name, desiredInstallTargets, previousTargets, previousStorePath, stored.Path)
 	if err != nil {
 		return plannedAdd{}, nil, err
 	}

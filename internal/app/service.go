@@ -309,6 +309,7 @@ func cloneManifest(doc manifest.Manifest) manifest.Manifest {
 			Source:        skill.Source,
 			UpstreamSkill: skill.UpstreamSkill,
 			Version:       skill.Version,
+			Enabled:       cloneBoolPtr(skill.Enabled),
 			Targets:       append([]string(nil), skill.Targets...),
 		}
 	}
@@ -401,6 +402,36 @@ func effectiveTargetsForSkill(doc *manifest.Manifest, skill manifest.Skill) []st
 		targets = append([]string(nil), skill.Targets...)
 	}
 	return targets
+}
+
+func installTargetsForSkill(doc *manifest.Manifest, skill manifest.Skill) []string {
+	if !skillEnabled(skill) {
+		return nil
+	}
+	return effectiveTargetsForSkill(doc, skill)
+}
+
+func skillEnabled(skill manifest.Skill) bool {
+	return skill.Enabled == nil || *skill.Enabled
+}
+
+func setSkillEnabled(skill *manifest.Skill, enabled bool) {
+	if enabled {
+		skill.Enabled = nil
+		return
+	}
+	skill.Enabled = boolPtr(false)
+}
+
+func boolPtr(v bool) *bool {
+	return &v
+}
+
+func cloneBoolPtr(v *bool) *bool {
+	if v == nil {
+		return nil
+	}
+	return boolPtr(*v)
 }
 
 func sameStrings(a, b []string) bool {

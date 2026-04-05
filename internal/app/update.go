@@ -141,7 +141,8 @@ func (s Service) Update(name string) ([]UpdateInfo, error) {
 		}
 
 		targets := effectiveTargetsForSkill(doc, mSkill)
-		changes, err := s.planUpdateTargetChanges(mSkill.Name, targets, previousTargets, previousStorePath, stored.Path)
+		desiredTargets := installTargetsForSkill(doc, mSkill)
+		changes, err := s.planUpdateTargetChanges(mSkill.Name, desiredTargets, previousTargets, previousStorePath, stored.Path)
 		if err != nil {
 			return nil, fmt.Errorf("skill %q: %w", mSkill.Name, err)
 		}

@@ -3,6 +3,7 @@ package app
 // SkillInfo holds display data for a single installed skill.
 type SkillInfo struct {
 	Name          string
+	Enabled       bool
 	Source        string
 	UpstreamSkill string
 	Commit        string
@@ -24,12 +25,10 @@ func (s Service) List() ([]SkillInfo, error) {
 		}
 		info := SkillInfo{
 			Name:          skill.Name,
+			Enabled:       skillEnabled(skill),
 			Source:        canonicalSource,
 			UpstreamSkill: upstreamSkill,
-			Targets:       doc.Targets,
-		}
-		if len(skill.Targets) > 0 {
-			info.Targets = skill.Targets
+			Targets:       effectiveTargetsForSkill(doc, skill),
 		}
 		if lock, ok := findLockSkill(lf.Skills, skill.Name); ok {
 			if len(lock.Commit) >= 7 {
