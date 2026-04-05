@@ -42,7 +42,7 @@ func (s Service) Disable(name string) error {
 	if err != nil {
 		return fmt.Errorf("read %s: %w", lockPath, err)
 	}
-	lf, err := readOrDefaultLockfile(lockPath)
+	lf, err := parseOrDefaultLockfile(originalLockData, hadLockfile)
 	if err != nil {
 		return fmt.Errorf("read %s: %w", lockPath, err)
 	}
@@ -64,7 +64,7 @@ func (s Service) Disable(name string) error {
 		backupPath, err := s.applyUpdateTargetChange(name, changes[i])
 		if err != nil {
 			rollbackApplied := append(append([]updateTargetChange(nil), applied...), changes[i])
-			rollbackErr := s.rollbackToggle(name, rollbackApplied, manifestPath, originalManifestData, lockPath, originalLockData, hadLockfile)
+			rollbackErr := s.rollbackRemove(name, rollbackApplied, manifestPath, originalManifestData, lockPath, originalLockData, hadLockfile)
 			if rollbackErr != nil {
 				return fmt.Errorf("disable targets: %w (rollback failed: %v)", err, rollbackErr)
 			}
@@ -82,14 +82,14 @@ func (s Service) Disable(name string) error {
 		break
 	}
 	if err := manifest.WriteFile(manifestPath, *doc); err != nil {
-		rollbackErr := s.rollbackToggle(name, applied, manifestPath, originalManifestData, lockPath, originalLockData, hadLockfile)
+		rollbackErr := s.rollbackRemove(name, applied, manifestPath, originalManifestData, lockPath, originalLockData, hadLockfile)
 		if rollbackErr != nil {
 			return fmt.Errorf("write %s: %w (rollback failed: %v)", manifestPath, err, rollbackErr)
 		}
 		return fmt.Errorf("write %s: %w", manifestPath, err)
 	}
 
-	cleanupRemoveBackups(applied)
+	cleanupTargetChangeBackups(applied)
 	return nil
 }
 
@@ -183,28 +183,6 @@ func (s Service) ensureLockedSkillStorePath(lockEntry lockfile.Skill, hasLock bo
 		return "", err
 	}
 	return stored.Path, nil
-}
-
-func (s Service) rollbackToggle(name string, applied []updateTargetChange, manifestPath string, manifestData []byte, lockPath string, lockData []byte, hadLockfile bool) error {
-	var rollbackErr error
-	for i := len(applied) - 1; i >= 0; i-- {
-		change := applied[i]
-		restorePath := change.PreviousPath
-		if restorePath == "" {
-			restorePath = change.BackupPath
-		}
-		if restorePath == "" {
-			continue
-		}
-		if err := s.materializeAll([]string{change.Target}, name, restorePath); err != nil {
-			rollbackErr = errors.Join(rollbackErr, err)
-		}
-	}
-	cleanupRemoveBackups(applied)
-	if err := restoreProjectFiles(manifestPath, manifestData, lockPath, lockData, hadLockfile); err != nil {
-		rollbackErr = errors.Join(rollbackErr, err)
-	}
-	return rollbackErr
 }
 
 func (s Service) ensureStoredForLock(src source.Git, lockEntry lockfile.Skill, skillName string) (store.Result, error) {

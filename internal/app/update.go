@@ -21,11 +21,6 @@ type UpdateInfo struct {
 	LatestAt      string
 }
 
-type plannedUpdate struct {
-	Name    string
-	Changes []updateTargetChange
-}
-
 type updateTargetChange struct {
 	Target       string
 	PreviousPath string
@@ -47,6 +42,11 @@ func (s Service) CheckUpdates(name string) ([]UpdateInfo, error) {
 		return nil, err
 	}
 
+	lockByName := make(map[string]lockfile.Skill, len(lf.Skills))
+	for _, ls := range lf.Skills {
+		lockByName[ls.Name] = ls
+	}
+
 	updates := make([]UpdateInfo, 0, len(selected))
 	for _, mSkill := range selected {
 		src, err := s.loadSkillSourceForScope(mSkill.Source, mSkill.UpstreamSkill)
@@ -62,7 +62,7 @@ func (s Service) CheckUpdates(name string) ([]UpdateInfo, error) {
 		}
 
 		currentCommit := ""
-		if locked, ok := findLockSkill(lf.Skills, mSkill.Name); ok {
+		if locked, ok := lockByName[mSkill.Name]; ok {
 			currentCommit = locked.Commit
 		}
 
@@ -100,9 +100,14 @@ func (s Service) Update(name string) ([]UpdateInfo, error) {
 		return nil, err
 	}
 
+	lockByName := make(map[string]lockfile.Skill, len(lf.Skills))
+	for _, ls := range lf.Skills {
+		lockByName[ls.Name] = ls
+	}
+
 	nextLock := cloneLockfile(*lf)
 	updates := make([]UpdateInfo, 0, len(selected))
-	plans := make([]plannedUpdate, 0, len(selected))
+	plans := make([]plannedTargetChanges, 0, len(selected))
 	for _, mSkill := range selected {
 		src, err := s.loadSkillSourceForScope(mSkill.Source, mSkill.UpstreamSkill)
 		if err != nil {
@@ -116,7 +121,7 @@ func (s Service) Update(name string) ([]UpdateInfo, error) {
 			continue
 		}
 
-		locked, hasLock := findLockSkill(lf.Skills, mSkill.Name)
+		locked, hasLock := lockByName[mSkill.Name]
 		if hasLock && locked.Commit == resolved.Commit {
 			continue
 		}
@@ -159,7 +164,7 @@ func (s Service) Update(name string) ([]UpdateInfo, error) {
 			return nil, fmt.Errorf("skill %q: %w", mSkill.Name, err)
 		}
 		upsertLockSkill(&nextLock, lockEntry)
-		plans = append(plans, plannedUpdate{
+		plans = append(plans, plannedTargetChanges{
 			Name:    mSkill.Name,
 			Changes: changes,
 		})
@@ -183,33 +188,18 @@ func (s Service) Update(name string) ([]UpdateInfo, error) {
 		return nil, fmt.Errorf("write %s: %w", lockPath, err)
 	}
 
-	applied := make([]plannedUpdate, 0, len(plans))
+	applied := make([]plannedTargetChanges, 0, len(plans))
 	for _, plan := range plans {
-		appliedCount := 0
-		for i := range plan.Changes {
-			backupPath, err := s.applyUpdateTargetChange(plan.Name, plan.Changes[i])
-			if err != nil {
-				rollbackPlans := append([]plannedUpdate(nil), applied...)
-				if appliedCount > 0 {
-					rollbackPlans = append(rollbackPlans, plannedUpdate{
-						Name:    plan.Name,
-						Changes: append([]updateTargetChange(nil), plan.Changes[:appliedCount]...),
-					})
-				}
-				rollbackErr := s.rollbackUpdate(rollbackPlans, lockPath, originalLockData, hadLockfile)
-				if rollbackErr != nil {
-					return nil, fmt.Errorf("skill %q: %w (rollback failed: %v)", plan.Name, err, rollbackErr)
-				}
-				return nil, fmt.Errorf("skill %q: %w", plan.Name, err)
-			}
-			plan.Changes[i].BackupPath = backupPath
-			appliedCount++
+		appliedPlan, failure := s.applyTargetChangePlan(plan, applied, func(applied []plannedTargetChanges) error {
+			return s.rollbackUpdate(applied, lockPath, originalLockData, hadLockfile)
+		})
+		if failure != nil {
+			return nil, formatTargetChangeFailure(fmt.Sprintf("skill %q: ", failure.Name), failure)
 		}
-		plan.Changes = plan.Changes[:appliedCount]
-		applied = append(applied, plan)
+		applied = append(applied, appliedPlan)
 	}
 
-	cleanupBackups(applied)
+	cleanupTargetChangePlanBackups(applied)
 	return updates, nil
 }
 
@@ -335,34 +325,13 @@ func reverseUpdateTargetChange(change updateTargetChange) updateTargetChange {
 	}
 }
 
-func (s Service) rollbackUpdate(applied []plannedUpdate, lockPath string, lockData []byte, hadLockfile bool) error {
-	var rollbackErr error
-	for i := len(applied) - 1; i >= 0; i-- {
-		for j := len(applied[i].Changes) - 1; j >= 0; j-- {
-			change := applied[i].Changes[j]
-			if change.PreviousPath == change.DesiredPath && change.BackupPath == "" {
-				continue
-			}
-			if _, err := s.applyUpdateTargetChange(applied[i].Name, reverseUpdateTargetChange(change)); err != nil {
-				rollbackErr = errors.Join(rollbackErr, err)
-			}
-		}
-	}
-	cleanupBackups(applied)
+func (s Service) rollbackUpdate(applied []plannedTargetChanges, lockPath string, lockData []byte, hadLockfile bool) error {
+	rollbackErr := s.rollbackTargetChangePlans(applied)
+	cleanupTargetChangePlanBackups(applied)
 	if err := restoreLockfile(lockPath, lockData, hadLockfile); err != nil {
 		rollbackErr = errors.Join(rollbackErr, err)
 	}
 	return rollbackErr
-}
-
-func cleanupBackups(plans []plannedUpdate) {
-	for _, plan := range plans {
-		for _, change := range plan.Changes {
-			if change.BackupPath != "" {
-				os.RemoveAll(change.BackupPath)
-			}
-		}
-	}
 }
 
 func resolveUpdateInfo(projectDir string, src source.Git) (source.ResolveInfo, bool, error) {

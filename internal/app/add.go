@@ -32,12 +32,15 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 		}
 		return nil, nil, fmt.Errorf("read %s: %w", path, err)
 	}
-	doc, err := s.readManifest(path)
+	doc, err := manifest.Parse(originalManifestData)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read %s: %w", path, err)
 	}
+	if err := s.validateManifestTargets(doc); err != nil {
+		return nil, nil, fmt.Errorf("read %s: %w", path, err)
+	}
 
-	src, err := s.prepareAddSource(rawSource)
+	src, err := s.loadSourceForScope(rawSource)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -65,7 +68,7 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 	if err != nil {
 		return nil, nil, fmt.Errorf("read %s: %w", lockPath, err)
 	}
-	lf, err := readOrDefaultLockfile(lockPath)
+	lf, err := parseOrDefaultLockfile(originalLockData, hadLockfile)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read %s: %w", lockPath, err)
 	}
@@ -386,30 +389,19 @@ func (s Service) commitAddPlans(
 			continue
 		}
 
-		appliedCount := 0
-		for i := range plan.Changes {
-			backupPath, err := s.applyUpdateTargetChange(plan.Name, plan.Changes[i])
-			if err != nil {
-				rollbackPlans := append([]plannedAdd(nil), applied...)
-				if appliedCount > 0 {
-					rollbackPlans = append(rollbackPlans, plannedAdd{
-						Name:    plan.Name,
-						Changes: append([]updateTargetChange(nil), plan.Changes[:appliedCount]...),
-					})
-				}
-				rollbackErr := s.rollbackAddSelected(rollbackPlans, manifestPath, originalManifestData, lockPath, originalLockData, hadLockfile)
-				if rollbackErr != nil {
-					return fmt.Errorf("%w (rollback failed: %v)", err, rollbackErr)
-				}
-				return err
+		appliedPlan, failure := s.applyTargetChangePlan(plan.targetChangesPlan(), targetChangePlansFromAdd(applied), func(applied []plannedTargetChanges) error {
+			return s.rollbackAddSelected(addPlansFromTargetChanges(applied), manifestPath, originalManifestData, lockPath, originalLockData, hadLockfile)
+		})
+		if failure != nil {
+			if failure.RollbackErr != nil {
+				return fmt.Errorf("%w (rollback failed: %v)", failure.Err, failure.RollbackErr)
 			}
-			plan.Changes[i].BackupPath = backupPath
-			appliedCount++
+			return failure.Err
 		}
-		plan.Changes = plan.Changes[:appliedCount]
+		plan.Changes = appliedPlan.Changes
 		applied = append(applied, plan)
 	}
-	cleanupAddBackups(applied)
+	cleanupTargetChangePlanBackups(targetChangePlansFromAdd(applied))
 	return nil
 }
 
@@ -422,29 +414,42 @@ func (s Service) rollbackAddSelected(applied []plannedAdd, manifestPath string, 
 			}
 			continue
 		}
-		for j := len(applied[i].Changes) - 1; j >= 0; j-- {
-			change := applied[i].Changes[j]
-			if change.PreviousPath == change.DesiredPath && change.BackupPath == "" {
-				continue
-			}
-			if _, err := s.applyUpdateTargetChange(applied[i].Name, reverseUpdateTargetChange(change)); err != nil {
-				rollbackErr = errors.Join(rollbackErr, err)
-			}
+		if err := s.rollbackTargetChangePlan(applied[i].targetChangesPlan()); err != nil {
+			rollbackErr = errors.Join(rollbackErr, err)
 		}
 	}
-	cleanupAddBackups(applied)
+	cleanupTargetChangePlanBackups(targetChangePlansFromAdd(applied))
 	if err := restoreProjectFiles(manifestPath, manifestData, lockPath, lockData, hadLockfile); err != nil {
 		rollbackErr = errors.Join(rollbackErr, err)
 	}
 	return rollbackErr
 }
 
-func cleanupAddBackups(plans []plannedAdd) {
-	for _, plan := range plans {
-		for _, change := range plan.Changes {
-			if change.BackupPath != "" {
-				os.RemoveAll(change.BackupPath)
-			}
-		}
+func (p plannedAdd) targetChangesPlan() plannedTargetChanges {
+	return plannedTargetChanges{
+		Name:    p.Name,
+		Changes: p.Changes,
 	}
+}
+
+func targetChangePlansFromAdd(plans []plannedAdd) []plannedTargetChanges {
+	converted := make([]plannedTargetChanges, 0, len(plans))
+	for _, plan := range plans {
+		if len(plan.Changes) == 0 {
+			continue
+		}
+		converted = append(converted, plan.targetChangesPlan())
+	}
+	return converted
+}
+
+func addPlansFromTargetChanges(plans []plannedTargetChanges) []plannedAdd {
+	converted := make([]plannedAdd, 0, len(plans))
+	for _, plan := range plans {
+		converted = append(converted, plannedAdd{
+			Name:    plan.Name,
+			Changes: plan.Changes,
+		})
+	}
+	return converted
 }

@@ -142,10 +142,6 @@ func (s Service) readManifest(path string) (*manifest.Manifest, error) {
 	return doc, nil
 }
 
-func (s Service) prepareAddSource(rawSource string) (source.Git, error) {
-	return source.ParseGit(rawSource)
-}
-
 func (s Service) loadSourceForScope(rawSource string) (source.Git, error) {
 	return source.ParseGit(rawSource)
 }
@@ -264,16 +260,20 @@ func findLockSkill(skills []lockfile.Skill, name string) (lockfile.Skill, bool) 
 	return lockfile.Skill{}, false
 }
 
-func readOrDefaultLockfile(path string) (*lockfile.Lockfile, error) {
-	lf, err := lockfile.ReadFile(path)
-	if err == nil {
-		return lf, nil
-	}
-	if errors.Is(err, os.ErrNotExist) {
+func parseOrDefaultLockfile(data []byte, existed bool) (*lockfile.Lockfile, error) {
+	if !existed {
 		doc := lockfile.Default()
 		return &doc, nil
 	}
-	return nil, err
+	return lockfile.Parse(data)
+}
+
+func readOrDefaultLockfile(path string) (*lockfile.Lockfile, error) {
+	data, existed, err := readOptionalFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return parseOrDefaultLockfile(data, existed)
 }
 
 func readOptionalFile(path string) ([]byte, bool, error) {

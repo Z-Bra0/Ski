@@ -22,8 +22,11 @@ func (s Service) Remove(name string, targetOverride []string) error {
 		}
 		return fmt.Errorf("read %s: %w", manifestPath, err)
 	}
-	doc, err := s.readManifest(manifestPath)
+	doc, err := manifest.Parse(originalManifestData)
 	if err != nil {
+		return fmt.Errorf("read %s: %w", manifestPath, err)
+	}
+	if err := s.validateManifestTargets(doc); err != nil {
 		return fmt.Errorf("read %s: %w", manifestPath, err)
 	}
 
@@ -39,7 +42,7 @@ func (s Service) Remove(name string, targetOverride []string) error {
 	if err != nil {
 		return fmt.Errorf("read %s: %w", lockPath, err)
 	}
-	lf, err := readOrDefaultLockfile(lockPath)
+	lf, err := parseOrDefaultLockfile(originalLockData, hadLockfile)
 	if err != nil {
 		return fmt.Errorf("read %s: %w", lockPath, err)
 	}
@@ -126,7 +129,7 @@ func (s Service) Remove(name string, targetOverride []string) error {
 		return fmt.Errorf("write %s: %w", lockPath, err)
 	}
 
-	cleanupRemoveBackups(applied)
+	cleanupTargetChangeBackups(applied)
 	return nil
 }
 
@@ -181,17 +184,9 @@ func (s Service) rollbackRemove(name string, applied []updateTargetChange, manif
 			rollbackErr = errors.Join(rollbackErr, err)
 		}
 	}
-	cleanupRemoveBackups(applied)
+	cleanupTargetChangeBackups(applied)
 	if err := restoreProjectFiles(manifestPath, manifestData, lockPath, lockData, hadLockfile); err != nil {
 		rollbackErr = errors.Join(rollbackErr, err)
 	}
 	return rollbackErr
-}
-
-func cleanupRemoveBackups(changes []updateTargetChange) {
-	for _, change := range changes {
-		if change.BackupPath != "" {
-			os.RemoveAll(change.BackupPath)
-		}
-	}
 }
