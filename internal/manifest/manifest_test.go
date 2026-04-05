@@ -6,10 +6,7 @@ import (
 	"testing"
 )
 
-func falsePtr() *bool {
-	v := false
-	return &v
-}
+func boolPtr(v bool) *bool { return &v }
 
 func TestMarshalParseRoundTrip(t *testing.T) {
 	t.Parallel()
@@ -28,7 +25,7 @@ func TestMarshalParseRoundTrip(t *testing.T) {
 				Name:          "audit-solidity",
 				Source:        "git:https://github.com/org/audit-solidity.git",
 				UpstreamSkill: "audit-solidity",
-				Enabled:       falsePtr(),
+				Enabled:       boolPtr(false),
 				Targets:       []string{"claude"},
 			},
 		},
@@ -203,7 +200,7 @@ func TestMarshalParseDisabledSkill(t *testing.T) {
 		Skills: []Skill{{
 			Name:    "repo-map",
 			Source:  "git:https://github.com/org/repo-map.git",
-			Enabled: falsePtr(),
+			Enabled: boolPtr(false),
 		}},
 	}
 

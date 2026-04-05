@@ -12,10 +12,7 @@ import (
 	"github.com/Z-Bra0/Ski/internal/manifest"
 )
 
-func disabledPtr() *bool {
-	v := false
-	return &v
-}
+func boolPtr(v bool) *bool { return &v }
 
 func TestDisableRemovesInstalledTargetsAndKeepsLockfile(t *testing.T) {
 	t.Parallel()
@@ -83,7 +80,7 @@ func TestEnableAcceptsSkillReferenceAndRestoresTarget(t *testing.T) {
 			Name:          "repo-map",
 			Source:        "git:" + repoPath + "@v1.0.0",
 			UpstreamSkill: "repo-map",
-			Enabled:       disabledPtr(),
+			Enabled:       boolPtr(false),
 		}},
 	})
 	if err := os.RemoveAll(filepath.Join(projectDir, ".claude", "skills", "repo-map")); err != nil {
@@ -132,7 +129,7 @@ func TestDisableRejectsAlreadyDisabledSkill(t *testing.T) {
 			Name:          "repo-map",
 			Source:        "git:" + repoPath + "@v1.0.0",
 			UpstreamSkill: "repo-map",
-			Enabled:       disabledPtr(),
+			Enabled:       boolPtr(false),
 		}},
 	}); err != nil {
 		t.Fatalf("WriteFile(manifest) error = %v", err)
@@ -198,7 +195,7 @@ func TestInstallRemovesDisabledSkillTargets(t *testing.T) {
 			Name:          "repo-map",
 			Source:        "git:" + repoPath + "@v1.0.0",
 			UpstreamSkill: "repo-map",
-			Enabled:       disabledPtr(),
+			Enabled:       boolPtr(false),
 		}},
 	}
 	installManifestForTest(t, projectDir, homeDir, doc)
@@ -302,7 +299,7 @@ func TestDoctorTreatsInstalledDisabledSkillAsUnexpected(t *testing.T) {
 			Name:          "repo-map",
 			Source:        "git:" + repoPath + "@v1.0.0",
 			UpstreamSkill: "repo-map",
-			Enabled:       disabledPtr(),
+			Enabled:       boolPtr(false),
 		}},
 	}); err != nil {
 		t.Fatalf("WriteFile(manifest) error = %v", err)
