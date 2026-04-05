@@ -63,6 +63,8 @@ func NewRootCmd(opts Options) *cobra.Command {
 
 	cmd.AddCommand(newAddCmd(opts))
 	cmd.AddCommand(newDoctorCmd(opts))
+	cmd.AddCommand(newDisableCmd(opts))
+	cmd.AddCommand(newEnableCmd(opts))
 	cmd.AddCommand(newInfoCmd(opts))
 	cmd.AddCommand(newInitCmd(opts))
 	cmd.AddCommand(newInstallCmd(opts))

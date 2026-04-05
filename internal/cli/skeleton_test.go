@@ -21,7 +21,7 @@ func TestRootHelpListsSkeletonCommands(t *testing.T) {
 	}
 
 	help := stdout.String()
-	for _, name := range []string{"doctor", "info", "install", "remove", "update", "list"} {
+	for _, name := range []string{"doctor", "disable", "enable", "info", "install", "remove", "update", "list"} {
 		if !strings.Contains(help, name) {
 			t.Fatalf("help output missing %q:\n%s", name, help)
 		}
@@ -37,6 +37,8 @@ func TestSkeletonCommandsReturnNotImplemented(t *testing.T) {
 		wantErr string
 	}{
 		{name: "doctor", args: []string{"doctor"}, wantErr: "ski.toml not found"},
+		{name: "disable", args: []string{"disable", "repo-map"}, wantErr: "ski.toml not found"},
+		{name: "enable", args: []string{"enable", "repo-map"}, wantErr: "ski.toml not found"},
 		{name: "list", args: []string{"list"}, wantErr: "ski.toml not found"},
 		{name: "remove", args: []string{"remove", "repo-map"}, wantErr: "ski.toml not found"},
 		{name: "update", args: []string{"update"}, wantErr: "ski.toml not found"},

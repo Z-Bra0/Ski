@@ -44,6 +44,7 @@ func TestInfoShowsDetailedSkillState(t *testing.T) {
 
 	out := stdout.String()
 	assertContains(t, out, "name: repo-map")
+	assertContains(t, out, "enabled: true")
 	assertContains(t, out, "source: git:"+repoPath+"@v1.0.0")
 	assertContains(t, out, "upstream: repo-map")
 	assertContains(t, out, "version: 1.2.3")
@@ -127,6 +128,51 @@ func TestInfoReportsDriftedTarget(t *testing.T) {
 	out := stdout.String()
 	assertContains(t, out, "target claude: drifted")
 	assertContains(t, out, filepath.Join(projectDir, ".claude", "skills", "repo-map"))
+}
+
+func TestInfoShowsDisabledSkillState(t *testing.T) {
+	t.Parallel()
+
+	repoPath, _ := createGitRepo(t, "repo-map", "repo-map")
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	installManifestForTest(t, projectDir, homeDir, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills: []manifest.Skill{{
+			Name:          "repo-map",
+			Source:        "git:" + repoPath + "@v1.0.0",
+			UpstreamSkill: "repo-map",
+		}},
+	})
+
+	disableCmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	disableCmd.SetArgs([]string{"disable", "repo-map"})
+	if err := disableCmd.Execute(); err != nil {
+		t.Fatalf("disable Execute() error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	infoCmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &stdout,
+		Stderr:     &bytes.Buffer{},
+	})
+	infoCmd.SetArgs([]string{"info", "repo-map"})
+	if err := infoCmd.Execute(); err != nil {
+		t.Fatalf("info Execute() error = %v", err)
+	}
+
+	out := stdout.String()
+	assertContains(t, out, "enabled: false")
+	assertContains(t, out, "target claude: missing")
 }
 
 func TestInfoErrorsForUnknownSkill(t *testing.T) {

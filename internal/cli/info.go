@@ -35,6 +35,7 @@ func newInfoCmd(opts Options) *cobra.Command {
 
 			out := cmd.OutOrStdout()
 			fmt.Fprintf(out, "name: %s\n", info.Name)
+			fmt.Fprintf(out, "enabled: %t\n", info.Enabled)
 			fmt.Fprintf(out, "source: %s\n", info.Source)
 			fmt.Fprintf(out, "upstream: %s\n", info.UpstreamSkill)
 			if info.Version != "" {

@@ -29,11 +29,16 @@ func newListCmd(opts Options) *cobra.Command {
 			}
 
 			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "#\tNAME\tSOURCE\tUPSTREAM\tCOMMIT\tTARGETS")
+			fmt.Fprintln(w, "#\tNAME\tSTATUS\tSOURCE\tUPSTREAM\tCOMMIT\tTARGETS")
 			for i, info := range infos {
-				fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\n",
+				status := "enabled"
+				if !info.Enabled {
+					status = "disabled"
+				}
+				fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
 					i+1,
 					info.Name,
+					status,
 					info.Source,
 					info.UpstreamSkill,
 					info.Commit,
