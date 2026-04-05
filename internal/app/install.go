@@ -68,6 +68,12 @@ func (s Service) Install() (int, error) {
 		if hasLock {
 			previousTargets = append(previousTargets, lockedEntry.Targets...)
 			previousPath = stored.Path
+		} else if !skillEnabled(mSkill) {
+			// No lock entry for a disabled skill. Use the effective targets as the
+			// previous set so that any stale target directories from a prior install
+			// are detected and removed.
+			previousTargets = effectiveTargets
+			previousPath = stored.Path
 		}
 		changes, err := s.planUpdateTargetChanges(mSkill.Name, desiredTargets, previousTargets, previousPath, stored.Path)
 		if err != nil {
