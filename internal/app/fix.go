@@ -119,7 +119,7 @@ func buildFixSkillState(doc *manifest.Manifest, lf *lockfile.Lockfile, skillName
 	if skill, ok := findSkill(doc.Skills, func(skill manifest.Skill) bool { return skill.Name == skillName }); ok {
 		state.manifestSkill = skill
 		state.hasManifest = true
-		state.effectiveTargets = installTargetsForSkill(doc, skill)
+		state.effectiveTargets = effectiveTargetsForSkill(doc, skill)
 	}
 	if lockEntry, ok := findLockSkill(lf.Skills, skillName); ok {
 		state.lockEntry = lockEntry
@@ -319,7 +319,7 @@ func collectTargetNames(expectedTargets []string, findings []DoctorFinding, inde
 }
 
 func (s Service) repairTarget(state fixSkillState, findings []DoctorFinding, results []FixResult, indexes []int, targetName string) error {
-	shouldExist := slices.Contains(state.effectiveTargets, targetName)
+	shouldExist := skillEnabled(state.manifestSkill) && slices.Contains(state.effectiveTargets, targetName)
 	expectedPath := ""
 	if shouldExist {
 		expectedPath = state.storePath
