@@ -12,6 +12,9 @@ import (
 	"github.com/Z-Bra0/Ski/internal/store"
 )
 
+var resolveGitCommit = source.ResolveGit
+var resolveGitInfo = source.ResolveGitInfo
+
 // UpdateInfo reports the current and latest commit for one skill update check.
 type UpdateInfo struct {
 	Name          string
@@ -335,12 +338,33 @@ func (s Service) rollbackUpdate(applied []plannedTargetChanges, lockPath string,
 }
 
 func resolveUpdateInfo(projectDir string, src source.Git) (source.ResolveInfo, bool, error) {
-	info, err := source.ResolveGitInfo(projectDir, src)
+	commit, err := resolveGitCommit(projectDir, src)
+	if err != nil {
+		if src.Ref != "" && source.IsCommitRef(src.Ref) && source.IsNoMatchingRevision(err) {
+			return source.ResolveInfo{}, true, nil
+		}
+		return source.ResolveInfo{}, false, err
+	}
+
+	info, err := resolveGitInfo(projectDir, src)
 	if err == nil {
+		info.Commit = commit
+		if info.Tracking == "" {
+			info.Tracking = fallbackUpdateTracking(src)
+		}
 		return info, false, nil
 	}
-	if src.Ref != "" && source.IsCommitRef(src.Ref) && source.IsNoMatchingRevision(err) {
-		return source.ResolveInfo{}, true, nil
+
+	return source.ResolveInfo{
+		Commit:   commit,
+		Tracking: fallbackUpdateTracking(src),
+		LatestAt: "",
+	}, false, nil
+}
+
+func fallbackUpdateTracking(src source.Git) string {
+	if src.Ref != "" {
+		return src.Ref
 	}
-	return source.ResolveInfo{}, false, err
+	return "HEAD"
 }

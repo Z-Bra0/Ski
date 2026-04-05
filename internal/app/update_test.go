@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -48,6 +49,43 @@ func TestResolveUpdateInfoReturnsErrorForMissingBranch(t *testing.T) {
 	}
 	if pinned {
 		t.Fatal("resolveUpdateInfo() pinned = true, want false")
+	}
+}
+
+func TestResolveUpdateInfoFallsBackWhenMetadataLookupFails(t *testing.T) {
+	t.Parallel()
+
+	originalResolveGitCommit := resolveGitCommit
+	originalResolveGitInfo := resolveGitInfo
+	t.Cleanup(func() {
+		resolveGitCommit = originalResolveGitCommit
+		resolveGitInfo = originalResolveGitInfo
+	})
+
+	resolveGitCommit = func(projectDir string, src source.Git) (string, error) {
+		return "abc1234abc1234abc1234abc1234abc1234abc1", nil
+	}
+	resolveGitInfo = func(projectDir string, src source.Git) (source.ResolveInfo, error) {
+		return source.ResolveInfo{}, fmt.Errorf("metadata lookup failed")
+	}
+
+	info, pinned, err := resolveUpdateInfo(t.TempDir(), source.Git{
+		URL: "https://example.com/repo-map.git",
+	})
+	if err != nil {
+		t.Fatalf("resolveUpdateInfo() error = %v", err)
+	}
+	if pinned {
+		t.Fatal("resolveUpdateInfo() pinned = true, want false")
+	}
+	if info.Commit != "abc1234abc1234abc1234abc1234abc1234abc1" {
+		t.Fatalf("resolveUpdateInfo().Commit = %q, want fallback commit", info.Commit)
+	}
+	if info.Tracking != "HEAD" {
+		t.Fatalf("resolveUpdateInfo().Tracking = %q, want HEAD", info.Tracking)
+	}
+	if info.LatestAt != "" {
+		t.Fatalf("resolveUpdateInfo().LatestAt = %q, want empty", info.LatestAt)
 	}
 }
 
