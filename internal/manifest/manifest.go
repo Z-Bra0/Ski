@@ -28,6 +28,7 @@ type Skill struct {
 	Source        string   `toml:"source"`
 	UpstreamSkill string   `toml:"upstream_skill,omitempty"`
 	Version       string   `toml:"version,omitempty"`
+	Enabled       *bool    `toml:"enabled,omitempty"`
 	Targets       []string `toml:"targets,omitempty"`
 }
 
@@ -128,5 +129,10 @@ func normalize(doc *Manifest) {
 	}
 	if doc.Skills == nil {
 		doc.Skills = []Skill{}
+	}
+	for i := range doc.Skills {
+		if doc.Skills[i].Enabled != nil && *doc.Skills[i].Enabled {
+			doc.Skills[i].Enabled = nil
+		}
 	}
 }
