@@ -119,7 +119,7 @@ func buildFixSkillState(doc *manifest.Manifest, lf *lockfile.Lockfile, skillName
 	if skill, ok := findSkill(doc.Skills, func(skill manifest.Skill) bool { return skill.Name == skillName }); ok {
 		state.manifestSkill = skill
 		state.hasManifest = true
-		state.effectiveTargets = effectiveTargetsForSkill(doc, skill)
+		state.effectiveTargets = installTargetsForSkill(doc, skill)
 	}
 	if lockEntry, ok := findLockSkill(lf.Skills, skillName); ok {
 		state.lockEntry = lockEntry

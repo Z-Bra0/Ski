@@ -1,5 +1,7 @@
 package app
 
+import "github.com/Z-Bra0/Ski/internal/lockfile"
+
 // SkillInfo holds display data for a single installed skill.
 type SkillInfo struct {
 	Name          string
@@ -17,6 +19,11 @@ func (s Service) List() ([]SkillInfo, error) {
 		return nil, err
 	}
 
+	lockByName := make(map[string]lockfile.Skill, len(lf.Skills))
+	for _, ls := range lf.Skills {
+		lockByName[ls.Name] = ls
+	}
+
 	infos := make([]SkillInfo, 0, len(doc.Skills))
 	for _, skill := range doc.Skills {
 		canonicalSource, upstreamSkill, err := canonicalSkillIdentity(skill.Source, skill.UpstreamSkill)
@@ -30,7 +37,7 @@ func (s Service) List() ([]SkillInfo, error) {
 			UpstreamSkill: upstreamSkill,
 			Targets:       effectiveTargetsForSkill(doc, skill),
 		}
-		if lock, ok := findLockSkill(lf.Skills, skill.Name); ok {
+		if lock, ok := lockByName[skill.Name]; ok {
 			if len(lock.Commit) >= 7 {
 				info.Commit = lock.Commit[:7]
 			} else {

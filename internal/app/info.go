@@ -2,7 +2,6 @@ package app
 
 import (
 	"fmt"
-	"path/filepath"
 	"slices"
 
 	"github.com/Z-Bra0/Ski/internal/manifest"
@@ -91,16 +90,6 @@ func (s Service) Info(name string) (DetailedSkillInfo, error) {
 }
 
 func (s Service) inspectTargetLink(targetName, skillName, expectedStorePath, storeError string, shouldExist bool) (TargetLinkInfo, error) {
-	dir, err := s.skillDir(targetName)
-	if err != nil {
-		return TargetLinkInfo{}, err
-	}
-
-	linkPath := filepath.Join(dir, skillName)
-	info := TargetLinkInfo{
-		Name: targetName,
-		Path: linkPath,
-	}
 	expectedPath := ""
 	if shouldExist {
 		expectedPath = expectedStorePath
@@ -109,35 +98,15 @@ func (s Service) inspectTargetLink(targetName, skillName, expectedStorePath, sto
 	if err != nil {
 		return TargetLinkInfo{}, err
 	}
-	info.Path = inspection.Path
 
-	if storeError != "" {
-		if !shouldExist {
-			switch inspection.Status {
-			case targetStatusInstalled:
-				info.Status = targetStatusInstalled
-			case targetStatusMissing:
-				info.Status = targetStatusMissing
-			case targetStatusDrifted:
-				info.Status = targetStatusDrifted
-			default:
-				info.Status = targetStatusUnexpectedEntry
-			}
-		} else {
-			info.Status = targetStatusStoreUnavailable
-		}
-		return info, nil
+	info := TargetLinkInfo{
+		Name:   targetName,
+		Path:   inspection.Path,
+		Status: inspection.Status,
 	}
 
-	switch inspection.Status {
-	case targetStatusInstalled:
-		info.Status = targetStatusInstalled
-	case targetStatusMissing:
-		info.Status = targetStatusMissing
-	case targetStatusDrifted:
-		info.Status = targetStatusDrifted
-	default:
-		info.Status = targetStatusUnexpectedEntry
+	if storeError != "" && shouldExist {
+		info.Status = targetStatusStoreUnavailable
 	}
 
 	return info, nil
