@@ -66,6 +66,63 @@ func TestDisableRemovesInstalledTargetsAndKeepsLockfile(t *testing.T) {
 	}
 }
 
+func TestDisableRemovesLockfileOnlyTargets(t *testing.T) {
+	t.Parallel()
+
+	repoPath, commit := createGitRepo(t, "repo-map", "repo-map")
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	installManifestForTest(t, projectDir, homeDir, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills: []manifest.Skill{{
+			Name:          "repo-map",
+			Source:        "git:" + repoPath + "@v1.0.0",
+			UpstreamSkill: "repo-map",
+		}},
+	})
+
+	lockPath := lockfile.Path(projectDir)
+	lf, err := lockfile.ReadFile(lockPath)
+	if err != nil {
+		t.Fatalf("ReadFile(lockfile) error = %v", err)
+	}
+	lf.Skills[0].Targets = []string{"claude", "codex"}
+	if err := lockfile.WriteFile(lockPath, *lf); err != nil {
+		t.Fatalf("WriteFile(lockfile) error = %v", err)
+	}
+
+	codexPath := filepath.Join(projectDir, ".codex", "skills", "repo-map")
+	storePath := filepath.Join(homeDir, ".ski", "store", "git", "repo-map", commit)
+	if err := os.MkdirAll(filepath.Dir(codexPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll(codex dir) error = %v", err)
+	}
+	if err := fsutil.CopyTree(storePath, codexPath); err != nil {
+		t.Fatalf("CopyTree(store -> codex) error = %v", err)
+	}
+
+	cmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &bytes.Buffer{},
+		Stderr:     &bytes.Buffer{},
+	})
+	cmd.SetArgs([]string{"disable", "repo-map"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("disable Execute() error = %v", err)
+	}
+
+	for _, path := range []string{
+		filepath.Join(projectDir, ".claude", "skills", "repo-map"),
+		codexPath,
+	} {
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Fatalf("installed target %s still exists after disable", path)
+		}
+	}
+}
+
 func TestEnableAcceptsSkillReferenceAndRestoresTarget(t *testing.T) {
 	t.Parallel()
 

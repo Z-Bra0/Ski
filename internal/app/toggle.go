@@ -49,6 +49,9 @@ func (s Service) Disable(name string) error {
 
 	effectiveTargets := effectiveTargetsForSkill(doc, ms)
 	lockEntry, hasLock := findLockSkill(lf.Skills, name)
+	if hasLock {
+		effectiveTargets = unionStrings(effectiveTargets, lockEntry.Targets)
+	}
 	previousStorePath, err := s.ensureLockedSkillStorePath(lockEntry, hasLock, name)
 	if err != nil {
 		return err
