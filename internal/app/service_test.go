@@ -201,6 +201,168 @@ func TestAddSelectedHonorsLegacySourceSelectorsWithoutExplicitSelection(t *testi
 	}
 }
 
+func TestAddSelectedUpdatesExistingSkillRefInPlace(t *testing.T) {
+	t.Parallel()
+
+	repo := testutil.NewSkillRepo(t, "repo-map", "repo-map")
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	manifestPath := filepath.Join(projectDir, manifest.FileName)
+	if err := manifest.WriteFile(manifestPath, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills:  []manifest.Skill{},
+	}); err != nil {
+		t.Fatalf("WriteFile(manifest) error = %v", err)
+	}
+
+	svc := Service{ProjectDir: projectDir, HomeDir: homeDir}
+	if _, _, err := svc.AddSelected("git:"+repo.URL+"@v1.0.0", nil, "", false, nil); err != nil {
+		t.Fatalf("AddSelected(initial) error = %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(repo.Path, "update-marker.txt"), []byte("v2\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(update-marker) error = %v", err)
+	}
+	testutil.RunGit(t, repo.Path, "add", ".")
+	testutil.RunGit(t, repo.Path, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "v2")
+	newCommit := strings.TrimSpace(testutil.RunGitOutput(t, repo.Path, "rev-parse", "HEAD"))
+
+	added, warnings, err := svc.AddSelected("git:"+repo.URL+"@"+newCommit, nil, "", false, nil)
+	if err != nil {
+		t.Fatalf("AddSelected(ref switch) error = %v", err)
+	}
+	if got, want := added, []string{"repo-map"}; !sameStrings(got, want) {
+		t.Fatalf("added = %#v, want %#v", got, want)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v, want none", warnings)
+	}
+
+	doc, err := manifest.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("ReadFile(manifest) error = %v", err)
+	}
+	wantManifest := manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills: []manifest.Skill{{
+			Name:          "repo-map",
+			Source:        "git:" + repo.URL + "@" + newCommit,
+			UpstreamSkill: "repo-map",
+		}},
+	}
+	if !reflect.DeepEqual(*doc, wantManifest) {
+		t.Fatalf("manifest = %#v, want %#v", *doc, wantManifest)
+	}
+
+	lf, err := lockfile.ReadFile(lockfile.Path(projectDir))
+	if err != nil {
+		t.Fatalf("ReadFile(lockfile) error = %v", err)
+	}
+	if len(lf.Skills) != 1 || lf.Skills[0].Commit != newCommit {
+		t.Fatalf("lockfile skills = %#v, want one entry with commit %q", lf.Skills, newCommit)
+	}
+
+	targetPath := filepath.Join(projectDir, ".claude", "skills", "repo-map")
+	assertInstalledSkillDir(t, targetPath)
+	if _, err := os.Stat(filepath.Join(targetPath, "update-marker.txt")); err != nil {
+		t.Fatalf("update-marker.txt missing after ref switch: %v", err)
+	}
+}
+
+func TestAddSelectedUpdatesExistingSkillRefAndAddsTargets(t *testing.T) {
+	t.Parallel()
+
+	repo := testutil.NewSkillRepo(t, "repo-map", "repo-map")
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	manifestPath := filepath.Join(projectDir, manifest.FileName)
+	if err := manifest.WriteFile(manifestPath, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills:  []manifest.Skill{},
+	}); err != nil {
+		t.Fatalf("WriteFile(manifest) error = %v", err)
+	}
+
+	svc := Service{ProjectDir: projectDir, HomeDir: homeDir}
+	if _, _, err := svc.AddSelected("git:"+repo.URL+"@v1.0.0", nil, "", false, nil); err != nil {
+		t.Fatalf("AddSelected(initial) error = %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(repo.Path, "update-marker.txt"), []byte("v2\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(update-marker) error = %v", err)
+	}
+	testutil.RunGit(t, repo.Path, "add", ".")
+	testutil.RunGit(t, repo.Path, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "v2")
+	newCommit := strings.TrimSpace(testutil.RunGitOutput(t, repo.Path, "rev-parse", "HEAD"))
+
+	if _, _, err := svc.AddSelected("git:"+repo.URL+"@"+newCommit, nil, "", false, []string{"codex"}); err != nil {
+		t.Fatalf("AddSelected(ref switch target override) error = %v", err)
+	}
+
+	doc, err := manifest.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("ReadFile(manifest) error = %v", err)
+	}
+	wantManifest := manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills: []manifest.Skill{{
+			Name:          "repo-map",
+			Source:        "git:" + repo.URL + "@" + newCommit,
+			UpstreamSkill: "repo-map",
+			Targets:       []string{"claude", "codex"},
+		}},
+	}
+	if !reflect.DeepEqual(*doc, wantManifest) {
+		t.Fatalf("manifest = %#v, want %#v", *doc, wantManifest)
+	}
+
+	lf, err := lockfile.ReadFile(lockfile.Path(projectDir))
+	if err != nil {
+		t.Fatalf("ReadFile(lockfile) error = %v", err)
+	}
+	if got, want := lf.Skills[0].Targets, []string{"claude", "codex"}; !sameStrings(got, want) {
+		t.Fatalf("lockfile targets = %#v, want %#v", got, want)
+	}
+
+	assertInstalledSkillDir(t, filepath.Join(projectDir, ".claude", "skills", "repo-map"))
+	assertInstalledSkillDir(t, filepath.Join(projectDir, ".codex", "skills", "repo-map"))
+}
+
+func TestAddSelectedRejectsRenamingExistingSkillViaNameOverride(t *testing.T) {
+	t.Parallel()
+
+	repo := testutil.NewSkillRepo(t, "repo-map", "repo-map")
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	if err := manifest.WriteFile(filepath.Join(projectDir, manifest.FileName), manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills:  []manifest.Skill{},
+	}); err != nil {
+		t.Fatalf("WriteFile(manifest) error = %v", err)
+	}
+
+	svc := Service{ProjectDir: projectDir, HomeDir: homeDir}
+	if _, _, err := svc.AddSelected("git:"+repo.URL+"@v1.0.0", nil, "existing-skill", false, nil); err != nil {
+		t.Fatalf("AddSelected(initial alias) error = %v", err)
+	}
+
+	_, _, err := svc.AddSelected("git:"+repo.URL, nil, "renamed-skill", false, nil)
+	if err == nil {
+		t.Fatal("AddSelected(rename existing) error = nil, want rename rejection")
+	}
+	if !strings.Contains(err.Error(), "renaming an existing skill via --name is not supported") {
+		t.Fatalf("AddSelected(rename existing) error = %v, want rename rejection", err)
+	}
+}
+
 func TestInitWithTargetsWritesSelectedTargets(t *testing.T) {
 	t.Parallel()
 

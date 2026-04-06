@@ -39,13 +39,13 @@ Reference spec: <https://agentskills.io/specification>
 
 ## Source Specifiers
 
-MVP accepts canonical `git:<url>` sources plus bare URL-form remote git sources such as `https://...`, `ssh://...`, and `git://...`, with optional `@<tag-or-commit>`.
+MVP accepts canonical `git:<url>` sources plus bare URL-form remote git sources such as `https://...`, `ssh://...`, and `git://...`, with optional `@<simple-ref>`.
 
 | Adapter | Format | Example |
 |---------|--------|---------|
 | `git` | `git:<url>[@ref]` or bare URL-form git source | `https://github.com/org/skill-pack.git@a1b2c3d` |
 
-`@ref` is optional. When omitted, resolves to default branch HEAD. `ref` can be a tag or a commit SHA.
+`@ref` is optional. When omitted, resolves to the remote default branch via `HEAD`. `ref` may be a simple branch name, tag name, or commit SHA. Refs containing `/` are currently unsupported.
 
 Bare URL-form git sources are normalized back to canonical `git:` strings when `ski.toml` and `ski.lock.json` are written. Local filesystem repositories are not supported as manifest sources.
 
@@ -100,6 +100,7 @@ name = "repo-map"
 source = "git:https://github.com/org/repo-map.git@v1.0.0"
 upstream_skill = "repo-map"
 version = "0.3.1"                 # informational — see Version Semantics
+enabled = false                   # optional; omitted means enabled
 
 [[skill]]
 name = "audit-solidity"
@@ -207,6 +208,8 @@ If `--target <name>` is provided, `ski add` writes those targets onto each added
 
 If the selected skill already exists in the active manifest with the same identity, `ski add --target ...` extends that existing skill into the requested additional targets instead of failing as a duplicate.
 
+If the selected skill already exists in the active manifest with the same repository URL and `upstream_skill`, `ski add` updates that existing skill in place even when the ref changes. The existing local skill name is preserved. If `--target` is provided, those targets are unioned into the existing skill.
+
 If no `--skill` is provided and the repository contains exactly one skill, `ski add` adds that skill automatically.
 
 If no `--skill` is provided and the repository contains multiple skills:
@@ -233,15 +236,17 @@ Reads the active manifest and lockfile. Fetches any missing skills into the stor
 
 If the active lockfile does not exist yet, `ski install` resolves the manifest entries, creates the lockfile, and installs the resulting skills.
 
+Disabled skills are still resolved and locked, but they are not installed into targets. If a disabled skill still has installed target directories, `ski install` removes them as reconciliation.
+
 ### `ski list`
 
-Lists the skills declared in the active scope, including canonical source, upstream skill, locked commit, and effective targets.
+Lists the skills declared in the active scope, including enabled/disabled state, canonical source, upstream skill, locked commit, and effective targets.
 
 `ski list` prints a 1-based `#` column. Commands in the same scope may use `@N` to refer to those rows without repeating the skill name, for example `ski info @1`, `ski update @1`, `ski remove @1`, or `ski add @1 --target codex`.
 
 ### `ski info <skill>`
 
-Shows detailed state for one declared skill in the active scope, including canonical source, upstream skill, informational version, locked commit, integrity, resolved store path, and per-target install status.
+Shows detailed state for one declared skill in the active scope, including enabled/disabled state, canonical source, upstream skill, informational version, locked commit, integrity, resolved store path, and per-target install status.
 
 ### `ski doctor`
 
@@ -266,6 +271,32 @@ No args: updates all skills to latest commit, rewrites lockfile.
 `ski update <skill>`: updates one skill.
 
 `ski update --check`: dry run — reports outdated skills without changing anything.
+
+`ski update --check` prints a compact table with:
+
+- `NAME` — local skill name
+- `TRACKING` — explicit manifest ref, or the remote default branch name when the source omits `@ref`
+- `CURRENT` — current locked commit short SHA, or `(none)` when no lock entry exists yet
+- `LATEST` — latest resolved commit short SHA
+- `LATEST_AT` — latest resolved commit date in `YYYY-MM-DD`
+
+Disabled skills are still checked and updated. `ski update` rewrites their lockfile entry normally, but it does not install them into targets.
+
+### `ski disable <skill>`
+
+Marks the selected declared skill as disabled in the active manifest and removes its installed target directories immediately.
+
+The lockfile entry is preserved. The skill remains tracked and may still be updated later.
+
+Commands in the same scope may use `@N` list references here, for example `ski disable @1`.
+
+### `ski enable <skill>`
+
+Marks the selected declared skill as enabled in the active manifest and restores its installed target directories from the existing locked state.
+
+If the locked store snapshot is missing, `ski enable` refetches it by the locked commit before restoring targets.
+
+Commands in the same scope may use `@N` list references here, for example `ski enable @1`.
 
 ### `ski remove <skill>`
 

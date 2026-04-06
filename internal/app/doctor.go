@@ -23,7 +23,6 @@ const (
 	FindingKindMissingTargetInstall = "missing_target_install"
 	FindingKindDriftedTarget        = "drifted_target"
 	FindingKindUnexpectedTarget     = "unexpected_target"
-	FindingKindLegacySymlink        = "legacy_symlink"
 	FindingKindUnexpectedEntryType  = "unexpected_entry_type"
 )
 
@@ -92,6 +91,7 @@ func (s Service) Doctor() ([]DoctorFinding, error) {
 func (s Service) doctorSkillFindings(doc *manifest.Manifest, skill manifest.Skill, locked lockfile.Skill) []DoctorFinding {
 	findings := make([]DoctorFinding, 0)
 	expectedTargets := effectiveTargetsForSkill(doc, skill)
+	installTargets := installTargetsForSkill(doc, skill)
 	targetsToInspect := unionStrings(expectedTargets, locked.Targets)
 
 	manifestSource, manifestUpstream, err := canonicalSkillIdentity(skill.Source, skill.UpstreamSkill)
@@ -161,7 +161,7 @@ func (s Service) doctorSkillFindings(doc *manifest.Manifest, skill manifest.Skil
 	}
 
 	for _, targetName := range targetsToInspect {
-		shouldExist := slices.Contains(expectedTargets, targetName)
+		shouldExist := slices.Contains(installTargets, targetName)
 		findings = append(findings, s.doctorTargetFindings(skill.Name, targetName, storePath, shouldExist)...)
 	}
 
@@ -233,14 +233,6 @@ func (s Service) doctorTargetFindings(skillName, targetName, storePath string, s
 			Kind:       FindingKindDriftedTarget,
 			Skill:      skillName,
 			Message:    driftedTargetError(inspection.Path).Error(),
-			TargetName: targetName,
-			StorePath:  storePath,
-		}}
-	case targetStatusLegacySymlink:
-		return []DoctorFinding{{
-			Kind:       FindingKindLegacySymlink,
-			Skill:      skillName,
-			Message:    legacySymlinkInstallError(inspection.Path).Error(),
 			TargetName: targetName,
 			StorePath:  storePath,
 		}}

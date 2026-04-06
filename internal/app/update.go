@@ -12,16 +12,16 @@ import (
 	"github.com/Z-Bra0/Ski/internal/store"
 )
 
+var resolveGitCommit = source.ResolveGit
+var resolveGitInfo = source.ResolveGitInfo
+
 // UpdateInfo reports the current and latest commit for one skill update check.
 type UpdateInfo struct {
 	Name          string
+	Tracking      string
 	CurrentCommit string
 	LatestCommit  string
-}
-
-type plannedUpdate struct {
-	Name    string
-	Changes []updateTargetChange
+	LatestAt      string
 }
 
 type updateTargetChange struct {
@@ -45,13 +45,18 @@ func (s Service) CheckUpdates(name string) ([]UpdateInfo, error) {
 		return nil, err
 	}
 
+	lockByName := make(map[string]lockfile.Skill, len(lf.Skills))
+	for _, ls := range lf.Skills {
+		lockByName[ls.Name] = ls
+	}
+
 	updates := make([]UpdateInfo, 0, len(selected))
 	for _, mSkill := range selected {
 		src, err := s.loadSkillSourceForScope(mSkill.Source, mSkill.UpstreamSkill)
 		if err != nil {
 			return nil, fmt.Errorf("skill %q: %w", mSkill.Name, err)
 		}
-		latestCommit, pinned, err := resolveUpdateCommit(s.sourceResolveDir(), src)
+		resolved, pinned, err := resolveUpdateInfo(s.sourceResolveDir(), src)
 		if err != nil {
 			return nil, fmt.Errorf("skill %q: %w", mSkill.Name, err)
 		}
@@ -60,18 +65,20 @@ func (s Service) CheckUpdates(name string) ([]UpdateInfo, error) {
 		}
 
 		currentCommit := ""
-		if locked, ok := findLockSkill(lf.Skills, mSkill.Name); ok {
+		if locked, ok := lockByName[mSkill.Name]; ok {
 			currentCommit = locked.Commit
 		}
 
-		if currentCommit == latestCommit {
+		if currentCommit == resolved.Commit {
 			continue
 		}
 
 		updates = append(updates, UpdateInfo{
 			Name:          mSkill.Name,
+			Tracking:      resolved.Tracking,
 			CurrentCommit: currentCommit,
-			LatestCommit:  latestCommit,
+			LatestCommit:  resolved.Commit,
+			LatestAt:      resolved.LatestAt,
 		})
 	}
 
@@ -96,15 +103,20 @@ func (s Service) Update(name string) ([]UpdateInfo, error) {
 		return nil, err
 	}
 
+	lockByName := make(map[string]lockfile.Skill, len(lf.Skills))
+	for _, ls := range lf.Skills {
+		lockByName[ls.Name] = ls
+	}
+
 	nextLock := cloneLockfile(*lf)
 	updates := make([]UpdateInfo, 0, len(selected))
-	plans := make([]plannedUpdate, 0, len(selected))
+	plans := make([]plannedTargetChanges, 0, len(selected))
 	for _, mSkill := range selected {
 		src, err := s.loadSkillSourceForScope(mSkill.Source, mSkill.UpstreamSkill)
 		if err != nil {
 			return nil, fmt.Errorf("skill %q: %w", mSkill.Name, err)
 		}
-		latestCommit, pinned, err := resolveUpdateCommit(s.sourceResolveDir(), src)
+		resolved, pinned, err := resolveUpdateInfo(s.sourceResolveDir(), src)
 		if err != nil {
 			return nil, fmt.Errorf("skill %q: %w", mSkill.Name, err)
 		}
@@ -112,8 +124,8 @@ func (s Service) Update(name string) ([]UpdateInfo, error) {
 			continue
 		}
 
-		locked, hasLock := findLockSkill(lf.Skills, mSkill.Name)
-		if hasLock && locked.Commit == latestCommit {
+		locked, hasLock := lockByName[mSkill.Name]
+		if hasLock && locked.Commit == resolved.Commit {
 			continue
 		}
 
@@ -130,14 +142,15 @@ func (s Service) Update(name string) ([]UpdateInfo, error) {
 			previousStorePath = previousStored.Path
 		}
 
-		src.Ref = latestCommit
+		src.Ref = resolved.Commit
 		stored, err := store.EnsureGit(s.sourceResolveDir(), s.HomeDir, src, mSkill.Name)
 		if err != nil {
 			return nil, fmt.Errorf("skill %q: %w", mSkill.Name, err)
 		}
 
 		targets := effectiveTargetsForSkill(doc, mSkill)
-		changes, err := s.planUpdateTargetChanges(mSkill.Name, targets, previousTargets, previousStorePath, stored.Path)
+		desiredTargets := installTargetsForSkill(doc, mSkill)
+		changes, err := s.planUpdateTargetChanges(mSkill.Name, desiredTargets, previousTargets, previousStorePath, stored.Path)
 		if err != nil {
 			return nil, fmt.Errorf("skill %q: %w", mSkill.Name, err)
 		}
@@ -154,14 +167,16 @@ func (s Service) Update(name string) ([]UpdateInfo, error) {
 			return nil, fmt.Errorf("skill %q: %w", mSkill.Name, err)
 		}
 		upsertLockSkill(&nextLock, lockEntry)
-		plans = append(plans, plannedUpdate{
+		plans = append(plans, plannedTargetChanges{
 			Name:    mSkill.Name,
 			Changes: changes,
 		})
 		updates = append(updates, UpdateInfo{
 			Name:          mSkill.Name,
+			Tracking:      resolved.Tracking,
 			CurrentCommit: locked.Commit,
 			LatestCommit:  stored.Commit,
+			LatestAt:      resolved.LatestAt,
 		})
 	}
 
@@ -176,33 +191,18 @@ func (s Service) Update(name string) ([]UpdateInfo, error) {
 		return nil, fmt.Errorf("write %s: %w", lockPath, err)
 	}
 
-	applied := make([]plannedUpdate, 0, len(plans))
+	applied := make([]plannedTargetChanges, 0, len(plans))
 	for _, plan := range plans {
-		appliedCount := 0
-		for i := range plan.Changes {
-			backupPath, err := s.applyUpdateTargetChange(plan.Name, plan.Changes[i])
-			if err != nil {
-				rollbackPlans := append([]plannedUpdate(nil), applied...)
-				if appliedCount > 0 {
-					rollbackPlans = append(rollbackPlans, plannedUpdate{
-						Name:    plan.Name,
-						Changes: append([]updateTargetChange(nil), plan.Changes[:appliedCount]...),
-					})
-				}
-				rollbackErr := s.rollbackUpdate(rollbackPlans, lockPath, originalLockData, hadLockfile)
-				if rollbackErr != nil {
-					return nil, fmt.Errorf("skill %q: %w (rollback failed: %v)", plan.Name, err, rollbackErr)
-				}
-				return nil, fmt.Errorf("skill %q: %w", plan.Name, err)
-			}
-			plan.Changes[i].BackupPath = backupPath
-			appliedCount++
+		appliedPlan, failure := s.applyTargetChangePlan(plan, applied, func(applied []plannedTargetChanges) error {
+			return s.rollbackUpdate(applied, lockPath, originalLockData, hadLockfile)
+		})
+		if failure != nil {
+			return nil, formatTargetChangeFailure(fmt.Sprintf("skill %q: ", failure.Name), failure)
 		}
-		plan.Changes = plan.Changes[:appliedCount]
-		applied = append(applied, plan)
+		applied = append(applied, appliedPlan)
 	}
 
-	cleanupBackups(applied)
+	cleanupTargetChangePlanBackups(applied)
 	return updates, nil
 }
 
@@ -250,8 +250,6 @@ func (s Service) planUpdateTargetChanges(skillName string, desiredTargets []stri
 				})
 				continue
 			}
-		case targetStatusLegacySymlink:
-			return nil, legacySymlinkInstallError(inspection.Path)
 		case targetStatusDrifted:
 			return nil, driftedTargetError(inspection.Path)
 		default:
@@ -330,43 +328,43 @@ func reverseUpdateTargetChange(change updateTargetChange) updateTargetChange {
 	}
 }
 
-func (s Service) rollbackUpdate(applied []plannedUpdate, lockPath string, lockData []byte, hadLockfile bool) error {
-	var rollbackErr error
-	for i := len(applied) - 1; i >= 0; i-- {
-		for j := len(applied[i].Changes) - 1; j >= 0; j-- {
-			change := applied[i].Changes[j]
-			if change.PreviousPath == change.DesiredPath && change.BackupPath == "" {
-				continue
-			}
-			if _, err := s.applyUpdateTargetChange(applied[i].Name, reverseUpdateTargetChange(change)); err != nil {
-				rollbackErr = errors.Join(rollbackErr, err)
-			}
-		}
-	}
-	cleanupBackups(applied)
+func (s Service) rollbackUpdate(applied []plannedTargetChanges, lockPath string, lockData []byte, hadLockfile bool) error {
+	rollbackErr := s.rollbackTargetChangePlans(applied)
+	cleanupTargetChangePlanBackups(applied)
 	if err := restoreLockfile(lockPath, lockData, hadLockfile); err != nil {
 		rollbackErr = errors.Join(rollbackErr, err)
 	}
 	return rollbackErr
 }
 
-func cleanupBackups(plans []plannedUpdate) {
-	for _, plan := range plans {
-		for _, change := range plan.Changes {
-			if change.BackupPath != "" {
-				os.RemoveAll(change.BackupPath)
-			}
+func resolveUpdateInfo(projectDir string, src source.Git) (source.ResolveInfo, bool, error) {
+	commit, err := resolveGitCommit(projectDir, src)
+	if err != nil {
+		if src.Ref != "" && source.IsCommitRef(src.Ref) && source.IsNoMatchingRevision(err) {
+			return source.ResolveInfo{}, true, nil
 		}
+		return source.ResolveInfo{}, false, err
 	}
+
+	info, err := resolveGitInfo(projectDir, src)
+	if err == nil {
+		info.Commit = commit
+		if info.Tracking == "" {
+			info.Tracking = fallbackUpdateTracking(src)
+		}
+		return info, false, nil
+	}
+
+	return source.ResolveInfo{
+		Commit:   commit,
+		Tracking: fallbackUpdateTracking(src),
+		LatestAt: "",
+	}, false, nil
 }
 
-func resolveUpdateCommit(projectDir string, src source.Git) (string, bool, error) {
-	commit, err := source.ResolveGit(projectDir, src)
-	if err == nil {
-		return commit, false, nil
+func fallbackUpdateTracking(src source.Git) string {
+	if src.Ref != "" {
+		return src.Ref
 	}
-	if src.Ref != "" && source.IsCommitRef(src.Ref) && source.IsNoMatchingRevision(err) {
-		return "", true, nil
-	}
-	return "", false, err
+	return "HEAD"
 }

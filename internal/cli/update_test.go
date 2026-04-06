@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -212,6 +213,8 @@ func TestUpdateCheckReportsWithoutMutating(t *testing.T) {
 	}
 
 	newCommit := advanceGitRepo(t, repoPathForURL(t, repoPath), "repo-map", "second")
+	tracking := strings.TrimSpace(runGitOutput(t, repoPathForURL(t, repoPath), "symbolic-ref", "--short", "HEAD"))
+	latestAt := strings.TrimSpace(runGitOutput(t, repoPathForURL(t, repoPath), "show", "-s", "--format=%cs", "HEAD"))
 
 	var stdout bytes.Buffer
 	checkCmd := NewRootCmd(Options{
@@ -236,8 +239,19 @@ func TestUpdateCheckReportsWithoutMutating(t *testing.T) {
 	linkPath := filepath.Join(projectDir, ".claude", "skills", "repo-map")
 	wantStore := filepath.Join(homeDir, ".ski", "store", "git", "repo-map", oldCommit)
 	assertInstalledSkillMatchesStore(t, linkPath, wantStore)
-	if !strings.Contains(stdout.String(), newCommit[:7]) || !strings.Contains(stdout.String(), "1 skills can be updated") {
-		t.Fatalf("stdout = %q, want check summary", stdout.String())
+	out := stdout.String()
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) < 3 {
+		t.Fatalf("stdout = %q, want table plus summary", out)
+	}
+	if got, want := strings.Fields(lines[0]), []string{"NAME", "TRACKING", "CURRENT", "LATEST", "LATEST_AT"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("header fields = %#v, want %#v", got, want)
+	}
+	if got, want := strings.Fields(lines[1]), []string{"repo-map", tracking, oldCommit[:7], newCommit[:7], latestAt}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("row fields = %#v, want %#v", got, want)
+	}
+	if !strings.Contains(out, "1 skills can be updated") {
+		t.Fatalf("stdout = %q, want check summary", out)
 	}
 }
 
@@ -347,11 +361,15 @@ func TestUpdateCheckAcceptsSkillReference(t *testing.T) {
 		t.Fatalf("update --check Execute() error = %v", err)
 	}
 
-	if !strings.Contains(stdout.String(), "repo-map "+oldCommitA[:7]+" -> "+newCommitA[:7]) {
-		t.Fatalf("stdout = %q, want repo-map update line", stdout.String())
+	out := stdout.String()
+	if !strings.Contains(out, "NAME") || !strings.Contains(out, "TRACKING") {
+		t.Fatalf("stdout = %q, want check table header", out)
 	}
-	if strings.Contains(stdout.String(), "audit-skill") {
-		t.Fatalf("stdout = %q, want no audit-skill update line", stdout.String())
+	if !strings.Contains(out, "repo-map") || !strings.Contains(out, oldCommitA[:7]) || !strings.Contains(out, newCommitA[:7]) {
+		t.Fatalf("stdout = %q, want repo-map update row", out)
+	}
+	if strings.Contains(out, "audit-skill") {
+		t.Fatalf("stdout = %q, want no audit-skill update row", out)
 	}
 }
 
@@ -532,7 +550,7 @@ func TestUpdateTracksHexTagRefs(t *testing.T) {
 	if err := checkCmd.Execute(); err != nil {
 		t.Fatalf("update --check Execute() error = %v", err)
 	}
-	if !strings.Contains(checkOut.String(), initialCommit[:7]) || !strings.Contains(checkOut.String(), newCommit[:7]) {
+	if !strings.Contains(checkOut.String(), "deadbeef") || !strings.Contains(checkOut.String(), initialCommit[:7]) || !strings.Contains(checkOut.String(), newCommit[:7]) {
 		t.Fatalf("stdout = %q, want hex tag update summary", checkOut.String())
 	}
 

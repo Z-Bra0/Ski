@@ -319,7 +319,7 @@ func collectTargetNames(expectedTargets []string, findings []DoctorFinding, inde
 }
 
 func (s Service) repairTarget(state fixSkillState, findings []DoctorFinding, results []FixResult, indexes []int, targetName string) error {
-	shouldExist := slices.Contains(state.effectiveTargets, targetName)
+	shouldExist := skillEnabled(state.manifestSkill) && slices.Contains(state.effectiveTargets, targetName)
 	expectedPath := ""
 	if shouldExist {
 		expectedPath = state.storePath
@@ -363,8 +363,6 @@ func (s Service) repairTarget(state fixSkillState, findings []DoctorFinding, res
 			return nil
 		}
 		markTargetFindingFixed(results, findings, indexes, targetName, FindingKindDriftedTarget, fmt.Sprintf("replaced drifted %s target", targetName))
-	case targetStatusLegacySymlink:
-		markTargetFindingNote(results, findings, indexes, targetName, FindingKindLegacySymlink, "manual intervention required")
 	default:
 		markTargetFindingNote(results, findings, indexes, targetName, FindingKindUnexpectedEntryType, "manual intervention required")
 	}
@@ -406,7 +404,7 @@ func markTargetFindingNote(results []FixResult, findings []DoctorFinding, indexe
 func canFinalizeTargetsMismatch(findings []DoctorFinding, results []FixResult, indexes []int) bool {
 	for _, idx := range indexes {
 		switch findings[idx].Kind {
-		case FindingKindMissingTargetInstall, FindingKindDriftedTarget, FindingKindUnexpectedTarget, FindingKindLegacySymlink, FindingKindUnexpectedEntryType:
+		case FindingKindMissingTargetInstall, FindingKindDriftedTarget, FindingKindUnexpectedTarget, FindingKindUnexpectedEntryType:
 			if findings[idx].TargetName == "" {
 				continue
 			}

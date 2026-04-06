@@ -8,9 +8,8 @@
 - `internal/manifest/` — ski.toml parse/write
 - `internal/lockfile/` — ski.lock.json read/write
 - `internal/store/` — central store (~/.ski/store)
-- `internal/source/` — source adapters (`git/` in the MVP; `github/` can be added later)
-- `internal/target/` — target adapters (claude/, codex/, cursor/, openclaw/)
-- `internal/scanner/` — security scanners
+- `internal/source/` — source adapters (`git.go` in the MVP; `github` can be added later)
+- `internal/target/` — target resolution and built-in targets (`claude`, `codex`, `cursor`, `copilot`, `windsurf`, `gemini`, `antigravity`, `openclaw`, `opencode`, `goose`, `agents`)
 
 ## Conventions
 

@@ -38,13 +38,8 @@ func Default() Lockfile {
 	}
 }
 
-// ReadFile reads, decodes, and validates a lockfile from disk.
-func ReadFile(path string) (*Lockfile, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-
+// Parse decodes and validates a lockfile from raw bytes.
+func Parse(data []byte) (*Lockfile, error) {
 	var lf Lockfile
 	if err := json.Unmarshal(data, &lf); err != nil {
 		return nil, err
@@ -53,6 +48,15 @@ func ReadFile(path string) (*Lockfile, error) {
 		return nil, err
 	}
 	return &lf, nil
+}
+
+// ReadFile reads, decodes, and validates a lockfile from disk.
+func ReadFile(path string) (*Lockfile, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return Parse(data)
 }
 
 // WriteFile validates and writes a lockfile to disk.

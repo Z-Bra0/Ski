@@ -6,6 +6,8 @@ import (
 	"testing"
 )
 
+func boolPtr(v bool) *bool { return &v }
+
 func TestMarshalParseRoundTrip(t *testing.T) {
 	t.Parallel()
 
@@ -23,6 +25,7 @@ func TestMarshalParseRoundTrip(t *testing.T) {
 				Name:          "audit-solidity",
 				Source:        "git:https://github.com/org/audit-solidity.git",
 				UpstreamSkill: "audit-solidity",
+				Enabled:       boolPtr(false),
 				Targets:       []string{"claude"},
 			},
 		},
@@ -185,5 +188,35 @@ unknown = "value"
 				t.Fatalf("Parse() error = %q, want substring %q", err.Error(), tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestMarshalParseDisabledSkill(t *testing.T) {
+	t.Parallel()
+
+	doc := Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills: []Skill{{
+			Name:    "repo-map",
+			Source:  "git:https://github.com/org/repo-map.git",
+			Enabled: boolPtr(false),
+		}},
+	}
+
+	data, err := Marshal(doc)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	if !strings.Contains(string(data), "enabled = false") {
+		t.Fatalf("Marshal() = %q, want enabled = false", string(data))
+	}
+
+	parsed, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if parsed.Skills[0].Enabled == nil || *parsed.Skills[0].Enabled {
+		t.Fatalf("Parse() enabled = %#v, want disabled", parsed.Skills[0].Enabled)
 	}
 }

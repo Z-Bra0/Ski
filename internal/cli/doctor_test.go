@@ -370,7 +370,7 @@ func TestDoctorFixRepairsMissingTargetInstall(t *testing.T) {
 	}
 }
 
-func TestDoctorFixReportsManualInterventionForLegacySymlink(t *testing.T) {
+func TestDoctorFixReportsManualInterventionForUnexpectedSymlinkEntry(t *testing.T) {
 	t.Parallel()
 
 	repoPath, _ := createGitRepo(t, "repo-map", "repo-map")

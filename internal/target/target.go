@@ -61,9 +61,6 @@ func linkDir(dir, name, storePath string) error {
 	entryPath := filepath.Join(dir, name)
 	info, err := os.Lstat(entryPath)
 	if err == nil {
-		if info.Mode()&os.ModeSymlink != 0 {
-			return legacySymlinkError(entryPath)
-		}
 		if !info.IsDir() {
 			return fmt.Errorf("%s already exists and is not a directory", entryPath)
 		}
@@ -106,9 +103,6 @@ func replaceDir(dir, name, storePath string) error {
 	}
 	if err != nil {
 		return fmt.Errorf("lstat %s: %w", entryPath, err)
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return legacySymlinkError(entryPath)
 	}
 	if !info.IsDir() {
 		return fmt.Errorf("%s already exists and is not a directory", entryPath)
@@ -190,9 +184,6 @@ func unlinkDir(dir, name string) error {
 	if err != nil {
 		return fmt.Errorf("lstat %s: %w", entryPath, err)
 	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return legacySymlinkError(entryPath)
-	}
 	if !info.IsDir() {
 		return fmt.Errorf("%s is not a directory; remove it manually", entryPath)
 	}
@@ -239,10 +230,6 @@ func reserveBackupPath(dir, name string) (string, error) {
 		return "", fmt.Errorf("prepare backup path %s: %w", backupPath, err)
 	}
 	return backupPath, nil
-}
-
-func legacySymlinkError(path string) error {
-	return fmt.Errorf("legacy symlink install at %s is unsupported; remove it and reinstall the skill", path)
 }
 
 // SkillDir resolves a target name to its project-scoped directory.

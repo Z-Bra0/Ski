@@ -9,6 +9,7 @@ import (
 	"github.com/Z-Bra0/Ski/internal/lockfile"
 	"github.com/Z-Bra0/Ski/internal/manifest"
 	"github.com/Z-Bra0/Ski/internal/skill"
+	"github.com/Z-Bra0/Ski/internal/source"
 	"github.com/Z-Bra0/Ski/internal/store"
 )
 
@@ -16,6 +17,7 @@ type plannedAdd struct {
 	Name      string
 	Targets   []string
 	StorePath string
+	Changes   []updateTargetChange
 }
 
 // Add parses a git source, fetches it into the store, installs targets,
@@ -30,12 +32,15 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 		}
 		return nil, nil, fmt.Errorf("read %s: %w", path, err)
 	}
-	doc, err := s.readManifest(path)
+	doc, err := manifest.Parse(originalManifestData)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read %s: %w", path, err)
 	}
+	if err := s.validateManifestTargets(doc); err != nil {
+		return nil, nil, fmt.Errorf("read %s: %w", path, err)
+	}
 
-	src, err := s.prepareAddSource(rawSource)
+	src, err := s.loadSourceForScope(rawSource)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -63,7 +68,7 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 	if err != nil {
 		return nil, nil, fmt.Errorf("read %s: %w", lockPath, err)
 	}
-	lf, err := readOrDefaultLockfile(lockPath)
+	lf, err := parseOrDefaultLockfile(originalLockData, hadLockfile)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read %s: %w", lockPath, err)
 	}
@@ -86,81 +91,37 @@ func (s Service) AddSelected(rawSource string, selectedSkills []string, nameOver
 		canonical := baseSource.String()
 
 		if existing, ok := findSkill(nextDoc.Skills, func(skill manifest.Skill) bool { return skill.Name == localName }); ok {
-			sameIdentity, err := sameSkillIdentity(existing.Source, existing.UpstreamSkill, canonical, selectedSkillName)
+			sameRepoIdentity, err := sameRepoSkillIdentity(existing.Source, existing.UpstreamSkill, canonical, selectedSkillName)
 			if err != nil {
 				return nil, nil, fmt.Errorf("skill %q: %w", existing.Name, err)
 			}
-			if !sameIdentity {
+			if !sameRepoIdentity {
 				return nil, nil, fmt.Errorf("skill name %q already exists for source %q", localName, existing.Source)
 			}
-			if len(targetOverride) == 0 {
-				return nil, nil, fmt.Errorf("skill name %q already exists for source %q", localName, existing.Source)
-			}
-
-			currentTargets := effectiveTargetsForSkill(&nextDoc, existing)
-			mergedTargets := unionStrings(currentTargets, targetOverride)
-			targetsToLink := differenceStrings(mergedTargets, currentTargets)
-
-			var (
-				stored        store.Result
-				skillWarnings []skill.ValidationWarning
-			)
-			if locked, ok := findLockSkill(nextLock.Skills, localName); ok {
-				stored, err = store.FindGit(s.HomeDir, baseSource.WithSkills([]string{selectedSkillName}), locked.Commit, selectedSkillName)
-				if err != nil {
-					return nil, nil, err
-				}
-				lockEntry := locked
-				lockEntry.Source = canonical
-				lockEntry.UpstreamSkill = selectedSkillName
-				lockEntry.Version = existing.Version
-				lockEntry.Targets = mergedTargets
-				upsertLockSkill(&nextLock, lockEntry)
-			} else {
-				stored, skillWarnings, err = store.EnsureGitWithWarnings(s.sourceResolveDir(), s.HomeDir, baseSource.WithSkills([]string{selectedSkillName}), selectedSkillName)
-				if err != nil {
-					return nil, nil, err
-				}
-				lockEntry := lockfile.Skill{
-					Name:          localName,
-					Source:        canonical,
-					UpstreamSkill: selectedSkillName,
-					Version:       existing.Version,
-					Commit:        stored.Commit,
-					Integrity:     stored.Integrity,
-					Targets:       mergedTargets,
-				}
-				upsertLockSkill(&nextLock, lockEntry)
-			}
-			warnings = append(warnings, skillWarnings...)
-
-			installTargets, err := s.preflightAddTargets(targetsToLink, localName, stored.Path)
+			plan, skillWarnings, err := s.planExistingSkillAdd(&nextDoc, &nextLock, existing, canonical, selectedSkillName, baseSource, targetOverride)
 			if err != nil {
 				return nil, nil, err
 			}
-
-			for i := range nextDoc.Skills {
-				if nextDoc.Skills[i].Name != localName {
-					continue
-				}
-				nextDoc.Skills[i].Source = canonical
-				nextDoc.Skills[i].UpstreamSkill = selectedSkillName
-				nextDoc.Skills[i].Targets = skillTargetsOverride(nextDoc.Targets, mergedTargets)
-				break
-			}
-
-			planned = append(planned, plannedAdd{
-				Name:      localName,
-				Targets:   append([]string(nil), installTargets...),
-				StorePath: stored.Path,
-			})
-			added = append(added, localName)
+			warnings = append(warnings, skillWarnings...)
+			planned = append(planned, plan)
+			added = append(added, existing.Name)
 			continue
 		}
-		if existing, ok, err := findSkillByIdentity(nextDoc.Skills, canonical, selectedSkillName); err != nil {
+		if existing, ok, err := findSkillByRepoIdentity(nextDoc.Skills, canonical, selectedSkillName); err != nil {
 			return nil, nil, err
 		} else if ok {
-			return nil, nil, fmt.Errorf("source %q with upstream skill %q already exists as skill %q", canonical, selectedSkillName, existing.Name)
+			if nameOverride != "" && nameOverride != existing.Name {
+				return nil, nil, fmt.Errorf("skill %q already exists for source %q; renaming an existing skill via --name is not supported", existing.Name, existing.Source)
+			}
+
+			plan, skillWarnings, err := s.planExistingSkillAdd(&nextDoc, &nextLock, existing, canonical, selectedSkillName, baseSource, targetOverride)
+			if err != nil {
+				return nil, nil, err
+			}
+			warnings = append(warnings, skillWarnings...)
+			planned = append(planned, plan)
+			added = append(added, existing.Name)
+			continue
 		}
 
 		stored, skillWarnings, err := store.EnsureGitWithWarnings(s.sourceResolveDir(), s.HomeDir, baseSource.WithSkills([]string{selectedSkillName}), selectedSkillName)
@@ -270,9 +231,9 @@ func resolveSkillSelection(discovered store.RepoResult, selectedSkills []string,
 	return resolved, nil
 }
 
-func findSkillByIdentity(skills []manifest.Skill, sourceValue, upstreamSkill string) (manifest.Skill, bool, error) {
+func findSkillByRepoIdentity(skills []manifest.Skill, sourceValue, upstreamSkill string) (manifest.Skill, bool, error) {
 	for _, skill := range skills {
-		same, err := sameSkillIdentity(skill.Source, skill.UpstreamSkill, sourceValue, upstreamSkill)
+		same, err := sameRepoSkillIdentity(skill.Source, skill.UpstreamSkill, sourceValue, upstreamSkill)
 		if err != nil {
 			return manifest.Skill{}, false, fmt.Errorf("skill %q: %w", skill.Name, err)
 		}
@@ -281,6 +242,74 @@ func findSkillByIdentity(skills []manifest.Skill, sourceValue, upstreamSkill str
 		}
 	}
 	return manifest.Skill{}, false, nil
+}
+
+func (s Service) planExistingSkillAdd(
+	nextDoc *manifest.Manifest,
+	nextLock *lockfile.Lockfile,
+	existing manifest.Skill,
+	canonical string,
+	selectedSkillName string,
+	baseSource source.Git,
+	targetOverride []string,
+) (plannedAdd, []skill.ValidationWarning, error) {
+	desiredTargets := effectiveTargetsForSkill(nextDoc, existing)
+	if len(targetOverride) > 0 {
+		desiredTargets = unionStrings(desiredTargets, targetOverride)
+	}
+	desiredInstallTargets := desiredTargets
+	if !skillEnabled(existing) {
+		desiredInstallTargets = nil
+	}
+
+	locked, hasLock := findLockSkill(nextLock.Skills, existing.Name)
+	previousTargets := []string(nil)
+	previousStorePath := ""
+	if hasLock {
+		previousTargets = append(previousTargets, locked.Targets...)
+		currentSrc, err := s.loadSkillSourceForScope(locked.Source, locked.UpstreamSkill)
+		if err != nil {
+			return plannedAdd{}, nil, err
+		}
+		currentSrc.Ref = locked.Commit
+		previousStored, err := store.FindGit(s.HomeDir, currentSrc, locked.Commit, existing.Name)
+		if err != nil {
+			return plannedAdd{}, nil, err
+		}
+		previousStorePath = previousStored.Path
+	}
+
+	stored, warnings, err := store.EnsureGitWithWarnings(s.sourceResolveDir(), s.HomeDir, baseSource.WithSkills([]string{selectedSkillName}), selectedSkillName)
+	if err != nil {
+		return plannedAdd{}, nil, err
+	}
+	changes, err := s.planUpdateTargetChanges(existing.Name, desiredInstallTargets, previousTargets, previousStorePath, stored.Path)
+	if err != nil {
+		return plannedAdd{}, nil, err
+	}
+
+	updatedEntry := existing
+	updatedEntry.Source = canonical
+	updatedEntry.UpstreamSkill = selectedSkillName
+	updatedEntry.Targets = skillTargetsOverride(nextDoc.Targets, desiredTargets)
+	for i := range nextDoc.Skills {
+		if nextDoc.Skills[i].Name != existing.Name {
+			continue
+		}
+		nextDoc.Skills[i] = updatedEntry
+		break
+	}
+
+	lockEntry, err := buildLockSkill(updatedEntry, stored, desiredTargets)
+	if err != nil {
+		return plannedAdd{}, nil, err
+	}
+	upsertLockSkill(nextLock, lockEntry)
+
+	return plannedAdd{
+		Name:    existing.Name,
+		Changes: changes,
+	}, warnings, nil
 }
 
 func (s Service) preflightAddTargets(targets []string, name, storePath string) ([]string, error) {
@@ -304,8 +333,6 @@ func (s Service) preflightAddTargets(targets []string, name, storePath string) (
 			installTargets = append(installTargets, targetName)
 		case targetStatusInstalled:
 			continue
-		case targetStatusLegacySymlink:
-			return nil, legacySymlinkInstallError(inspection.Path)
 		case targetStatusDrifted:
 			return nil, driftedTargetError(inspection.Path)
 		default:
@@ -350,27 +377,91 @@ func (s Service) commitAddPlans(
 
 	applied := make([]plannedAdd, 0, len(planned))
 	for _, plan := range planned {
-		if err := s.materializeAll(plan.Targets, plan.Name, plan.StorePath); err != nil {
-			rollbackErr := s.rollbackAddSelected(applied, manifestPath, originalManifestData, lockPath, originalLockData, hadLockfile)
-			if rollbackErr != nil {
-				return fmt.Errorf("%w (rollback failed: %v)", err, rollbackErr)
+		if len(plan.Changes) == 0 {
+			if err := s.materializeAll(plan.Targets, plan.Name, plan.StorePath); err != nil {
+				rollbackErr := s.rollbackAddSelected(applied, manifestPath, originalManifestData, lockPath, originalLockData, hadLockfile)
+				if rollbackErr != nil {
+					return fmt.Errorf("%w (rollback failed: %v)", err, rollbackErr)
+				}
+				return err
 			}
-			return err
+			applied = append(applied, plan)
+			continue
 		}
+
+		priorApplied := applied
+		appliedPlan, failure := s.applyTargetChangePlan(plan.targetChangesPlan(), targetChangePlansFromAdd(applied), func(innerApplied []plannedTargetChanges) error {
+			// innerApplied contains previously applied non-zero-change plans plus any
+			// partially applied changes from the current plan. Zero-change plans
+			// (materialized new skills) are not tracked in innerApplied, so we
+			// reconstruct the full list by prepending them from priorApplied.
+			all := make([]plannedAdd, 0, len(priorApplied)+len(innerApplied))
+			for _, p := range priorApplied {
+				if len(p.Changes) == 0 {
+					all = append(all, p)
+				}
+			}
+			all = append(all, addPlansFromTargetChanges(innerApplied)...)
+			return s.rollbackAddSelected(all, manifestPath, originalManifestData, lockPath, originalLockData, hadLockfile)
+		})
+		if failure != nil {
+			if failure.RollbackErr != nil {
+				return fmt.Errorf("%w (rollback failed: %v)", failure.Err, failure.RollbackErr)
+			}
+			return failure.Err
+		}
+		plan.Changes = appliedPlan.Changes
 		applied = append(applied, plan)
 	}
+	cleanupTargetChangePlanBackups(targetChangePlansFromAdd(applied))
 	return nil
 }
 
 func (s Service) rollbackAddSelected(applied []plannedAdd, manifestPath string, manifestData []byte, lockPath string, lockData []byte, hadLockfile bool) error {
 	var rollbackErr error
 	for i := len(applied) - 1; i >= 0; i-- {
-		if err := s.removeAll(applied[i].Targets, applied[i].Name); err != nil {
+		if len(applied[i].Changes) == 0 {
+			if err := s.removeAll(applied[i].Targets, applied[i].Name); err != nil {
+				rollbackErr = errors.Join(rollbackErr, err)
+			}
+			continue
+		}
+		if err := s.rollbackTargetChangePlan(applied[i].targetChangesPlan()); err != nil {
 			rollbackErr = errors.Join(rollbackErr, err)
 		}
 	}
+	cleanupTargetChangePlanBackups(targetChangePlansFromAdd(applied))
 	if err := restoreProjectFiles(manifestPath, manifestData, lockPath, lockData, hadLockfile); err != nil {
 		rollbackErr = errors.Join(rollbackErr, err)
 	}
 	return rollbackErr
+}
+
+func (p plannedAdd) targetChangesPlan() plannedTargetChanges {
+	return plannedTargetChanges{
+		Name:    p.Name,
+		Changes: p.Changes,
+	}
+}
+
+func targetChangePlansFromAdd(plans []plannedAdd) []plannedTargetChanges {
+	converted := make([]plannedTargetChanges, 0, len(plans))
+	for _, plan := range plans {
+		if len(plan.Changes) == 0 {
+			continue
+		}
+		converted = append(converted, plan.targetChangesPlan())
+	}
+	return converted
+}
+
+func addPlansFromTargetChanges(plans []plannedTargetChanges) []plannedAdd {
+	converted := make([]plannedAdd, 0, len(plans))
+	for _, plan := range plans {
+		converted = append(converted, plannedAdd{
+			Name:    plan.Name,
+			Changes: plan.Changes,
+		})
+	}
+	return converted
 }

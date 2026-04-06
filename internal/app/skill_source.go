@@ -53,12 +53,20 @@ func canonicalSkillIdentity(rawSource, upstreamSkill string) (string, string, er
 	return ref.Base.String(), ref.UpstreamSkill, nil
 }
 
-func sameSkillIdentity(leftSource, leftUpstream, rightSource, rightUpstream string) (bool, error) {
-	leftCanonical, leftSkill, err := canonicalSkillIdentity(leftSource, leftUpstream)
+func canonicalRepoSkillIdentity(rawSource, upstreamSkill string) (string, string, error) {
+	ref, err := parseSkillSourceRef(rawSource, upstreamSkill)
+	if err != nil {
+		return "", "", err
+	}
+	return ref.Base.WithoutRef().String(), ref.UpstreamSkill, nil
+}
+
+func sameRepoSkillIdentity(leftSource, leftUpstream, rightSource, rightUpstream string) (bool, error) {
+	leftCanonical, leftSkill, err := canonicalRepoSkillIdentity(leftSource, leftUpstream)
 	if err != nil {
 		return false, err
 	}
-	rightCanonical, rightSkill, err := canonicalSkillIdentity(rightSource, rightUpstream)
+	rightCanonical, rightSkill, err := canonicalRepoSkillIdentity(rightSource, rightUpstream)
 	if err != nil {
 		return false, err
 	}

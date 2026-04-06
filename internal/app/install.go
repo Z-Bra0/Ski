@@ -10,11 +10,6 @@ import (
 	"github.com/Z-Bra0/Ski/internal/store"
 )
 
-type plannedInstall struct {
-	Name    string
-	Changes []updateTargetChange
-}
-
 // Install reads the active manifest and lockfile, fetches all skills into the
 // store, verifies integrity, and installs them to configured targets.
 // Returns the number of skills processed.
@@ -33,20 +28,25 @@ func (s Service) Install() (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("read %s: %w", lockPath, err)
 	}
-	lf, err := readOrDefaultLockfile(lockPath)
+	lf, err := parseOrDefaultLockfile(originalLockData, hadLockfile)
 	if err != nil {
 		return 0, fmt.Errorf("read %s: %w", lockPath, err)
 	}
 
+	lockByName := make(map[string]lockfile.Skill, len(lf.Skills))
+	for _, ls := range lf.Skills {
+		lockByName[ls.Name] = ls
+	}
+
 	nextLock := cloneLockfile(*lf)
-	plans := make([]plannedInstall, 0, len(doc.Skills))
+	plans := make([]plannedTargetChanges, 0, len(doc.Skills))
 	for _, mSkill := range doc.Skills {
 		src, err := s.loadSkillSourceForScope(mSkill.Source, mSkill.UpstreamSkill)
 		if err != nil {
 			return 0, fmt.Errorf("skill %q: %w", mSkill.Name, err)
 		}
 
-		lockedEntry, hasLock := findLockSkill(lf.Skills, mSkill.Name)
+		lockedEntry, hasLock := lockByName[mSkill.Name]
 		if hasLock {
 			src.Ref = lockedEntry.Commit
 		}
@@ -62,13 +62,20 @@ func (s Service) Install() (int, error) {
 		}
 
 		effectiveTargets := effectiveTargetsForSkill(doc, mSkill)
+		desiredTargets := installTargetsForSkill(doc, mSkill)
 		previousTargets := []string(nil)
 		previousPath := ""
 		if hasLock {
 			previousTargets = append(previousTargets, lockedEntry.Targets...)
 			previousPath = stored.Path
+		} else if !skillEnabled(mSkill) {
+			// No lock entry for a disabled skill. Use the effective targets as the
+			// previous set so that any stale target directories from a prior install
+			// are detected and removed.
+			previousTargets = effectiveTargets
+			previousPath = stored.Path
 		}
-		changes, err := s.planUpdateTargetChanges(mSkill.Name, effectiveTargets, previousTargets, previousPath, stored.Path)
+		changes, err := s.planUpdateTargetChanges(mSkill.Name, desiredTargets, previousTargets, previousPath, stored.Path)
 		if err != nil {
 			return 0, fmt.Errorf("skill %q: %w", mSkill.Name, err)
 		}
@@ -85,7 +92,7 @@ func (s Service) Install() (int, error) {
 			return 0, fmt.Errorf("skill %q: %w", mSkill.Name, err)
 		}
 		upsertLockSkill(&nextLock, lockEntry)
-		plans = append(plans, plannedInstall{
+		plans = append(plans, plannedTargetChanges{
 			Name:    mSkill.Name,
 			Changes: changes,
 		})
@@ -98,62 +105,26 @@ func (s Service) Install() (int, error) {
 		return 0, fmt.Errorf("write %s: %w", lockPath, err)
 	}
 
-	applied := make([]plannedInstall, 0, len(plans))
+	applied := make([]plannedTargetChanges, 0, len(plans))
 	for _, plan := range plans {
-		appliedCount := 0
-		for i := range plan.Changes {
-			backupPath, err := s.applyUpdateTargetChange(plan.Name, plan.Changes[i])
-			if err != nil {
-				rollbackPlans := append([]plannedInstall(nil), applied...)
-				if appliedCount > 0 {
-					rollbackPlans = append(rollbackPlans, plannedInstall{
-						Name:    plan.Name,
-						Changes: append([]updateTargetChange(nil), plan.Changes[:appliedCount]...),
-					})
-				}
-				rollbackErr := s.rollbackInstall(rollbackPlans, lockPath, originalLockData, hadLockfile)
-				if rollbackErr != nil {
-					return 0, fmt.Errorf("skill %q: %w (rollback failed: %v)", plan.Name, err, rollbackErr)
-				}
-				return 0, fmt.Errorf("skill %q: %w", plan.Name, err)
-			}
-			plan.Changes[i].BackupPath = backupPath
-			appliedCount++
+		appliedPlan, failure := s.applyTargetChangePlan(plan, applied, func(applied []plannedTargetChanges) error {
+			return s.rollbackInstall(applied, lockPath, originalLockData, hadLockfile)
+		})
+		if failure != nil {
+			return 0, formatTargetChangeFailure(fmt.Sprintf("skill %q: ", failure.Name), failure)
 		}
-		plan.Changes = plan.Changes[:appliedCount]
-		applied = append(applied, plan)
+		applied = append(applied, appliedPlan)
 	}
 
-	cleanupInstallBackups(applied)
+	cleanupTargetChangePlanBackups(applied)
 	return len(plans), nil
 }
 
-func (s Service) rollbackInstall(applied []plannedInstall, lockPath string, lockData []byte, hadLockfile bool) error {
-	var rollbackErr error
-	for i := len(applied) - 1; i >= 0; i-- {
-		for j := len(applied[i].Changes) - 1; j >= 0; j-- {
-			change := applied[i].Changes[j]
-			if change.PreviousPath == change.DesiredPath && change.BackupPath == "" {
-				continue
-			}
-			if _, err := s.applyUpdateTargetChange(applied[i].Name, reverseUpdateTargetChange(change)); err != nil {
-				rollbackErr = errors.Join(rollbackErr, err)
-			}
-		}
-	}
-	cleanupInstallBackups(applied)
+func (s Service) rollbackInstall(applied []plannedTargetChanges, lockPath string, lockData []byte, hadLockfile bool) error {
+	rollbackErr := s.rollbackTargetChangePlans(applied)
+	cleanupTargetChangePlanBackups(applied)
 	if err := restoreLockfile(lockPath, lockData, hadLockfile); err != nil {
 		rollbackErr = errors.Join(rollbackErr, err)
 	}
 	return rollbackErr
-}
-
-func cleanupInstallBackups(plans []plannedInstall) {
-	for _, plan := range plans {
-		for _, change := range plan.Changes {
-			if change.BackupPath != "" {
-				os.RemoveAll(change.BackupPath)
-			}
-		}
-	}
 }

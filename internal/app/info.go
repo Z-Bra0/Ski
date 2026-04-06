@@ -2,7 +2,7 @@ package app
 
 import (
 	"fmt"
-	"path/filepath"
+	"slices"
 
 	"github.com/Z-Bra0/Ski/internal/manifest"
 	"github.com/Z-Bra0/Ski/internal/store"
@@ -18,6 +18,7 @@ type TargetLinkInfo struct {
 // DetailedSkillInfo reports the resolved state for one declared skill.
 type DetailedSkillInfo struct {
 	Name          string
+	Enabled       bool
 	Source        string
 	UpstreamSkill string
 	Version       string
@@ -47,12 +48,14 @@ func (s Service) Info(name string) (DetailedSkillInfo, error) {
 
 	info := DetailedSkillInfo{
 		Name:          skill.Name,
+		Enabled:       skillEnabled(skill),
 		Source:        sourceValue,
 		UpstreamSkill: upstreamSkill,
 		Version:       skill.Version,
 	}
 
 	targets := effectiveTargetsForSkill(doc, skill)
+	installTargets := installTargetsForSkill(doc, skill)
 	info.Targets = make([]TargetLinkInfo, 0, len(targets))
 
 	lockEntry, hasLock := findLockSkill(lf.Skills, skill.Name)
@@ -76,7 +79,7 @@ func (s Service) Info(name string) (DetailedSkillInfo, error) {
 	}
 
 	for _, targetName := range targets {
-		targetInfo, err := s.inspectTargetLink(targetName, skill.Name, info.StorePath, info.StoreError)
+		targetInfo, err := s.inspectTargetLink(targetName, skill.Name, info.StorePath, info.StoreError, len(installTargets) > 0 && slices.Contains(installTargets, targetName))
 		if err != nil {
 			return DetailedSkillInfo{}, err
 		}
@@ -86,45 +89,26 @@ func (s Service) Info(name string) (DetailedSkillInfo, error) {
 	return info, nil
 }
 
-func (s Service) inspectTargetLink(targetName, skillName, expectedStorePath, storeError string) (TargetLinkInfo, error) {
-	dir, err := s.skillDir(targetName)
+func (s Service) inspectTargetLink(targetName, skillName, expectedStorePath, storeError string, shouldExist bool) (TargetLinkInfo, error) {
+	expectedPath := ""
+	if shouldExist {
+		expectedPath = expectedStorePath
+	}
+	inspection, err := s.inspectTarget(targetName, skillName, expectedPath)
 	if err != nil {
 		return TargetLinkInfo{}, err
 	}
 
-	linkPath := filepath.Join(dir, skillName)
 	info := TargetLinkInfo{
-		Name: targetName,
-		Path: linkPath,
-	}
-	inspection, err := s.inspectTarget(targetName, skillName, expectedStorePath)
-	if err != nil {
-		return TargetLinkInfo{}, err
-	}
-	info.Path = inspection.Path
-
-	if storeError != "" {
-		switch inspection.Status {
-		case targetStatusMissing:
-			info.Status = targetStatusStoreUnavailable
-		default:
-			info.Status = targetStatusStoreUnavailable
-		}
-		return info, nil
+		Name:   targetName,
+		Path:   inspection.Path,
+		Status: inspection.Status,
 	}
 
-	switch inspection.Status {
-	case targetStatusInstalled:
-		info.Status = targetStatusInstalled
-	case targetStatusMissing:
-		info.Status = targetStatusMissing
-	case targetStatusLegacySymlink:
-		info.Status = targetStatusLegacySymlink
-	case targetStatusDrifted:
-		info.Status = targetStatusDrifted
-	default:
-		info.Status = targetStatusUnexpectedEntry
+	if storeError != "" && shouldExist {
+		info.Status = targetStatusStoreUnavailable
 	}
 
 	return info, nil
 }
+
