@@ -137,6 +137,53 @@ func TestDoctorFixReportsManualInterventionForUnmanagedLocalTargetEntry(t *testi
 	}
 }
 
+func TestDoctorFixReportsManualInterventionForUnreadableTargetRoot(t *testing.T) {
+	t.Parallel()
+
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	if err := manifest.WriteFile(filepath.Join(projectDir, manifest.FileName), manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills:  []manifest.Skill{},
+	}); err != nil {
+		t.Fatalf("WriteFile(manifest) error = %v", err)
+	}
+
+	targetRoot := filepath.Join(projectDir, ".claude", "skills")
+	if err := os.MkdirAll(filepath.Dir(targetRoot), 0o755); err != nil {
+		t.Fatalf("MkdirAll(parent) error = %v", err)
+	}
+	if err := os.WriteFile(targetRoot, []byte("not a directory"), 0o644); err != nil {
+		t.Fatalf("WriteFile(targetRoot) error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	doctorCmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &stdout,
+		Stderr:     &bytes.Buffer{},
+	})
+	doctorCmd.SetArgs([]string{"doctor", "--fix"})
+	err := doctorCmd.Execute()
+	if err == nil {
+		t.Fatal("doctor --fix Execute() error = nil, want manual intervention error")
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "[claude] read") {
+		t.Fatalf("stdout = %q, want target-attributed read error", out)
+	}
+	if !strings.Contains(out, "skipped: manual intervention required") {
+		t.Fatalf("stdout = %q, want skipped manual intervention output", out)
+	}
+	if !strings.Contains(out, "doctor: fixed 0 issues, 1 require manual intervention") {
+		t.Fatalf("stdout = %q, want manual summary", out)
+	}
+}
+
 func TestDoctorReportsHealthyGlobalScope(t *testing.T) {
 	t.Parallel()
 

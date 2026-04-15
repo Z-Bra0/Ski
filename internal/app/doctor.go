@@ -41,6 +41,9 @@ type DoctorFinding struct {
 // String formats a DoctorFinding for CLI display.
 func (f DoctorFinding) String() string {
 	if f.Skill == "" {
+		if f.TargetName != "" {
+			return fmt.Sprintf("[%s] %s", f.TargetName, f.Message)
+		}
 		return f.Message
 	}
 	return fmt.Sprintf("%s: %s", f.Skill, f.Message)

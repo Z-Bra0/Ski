@@ -44,7 +44,8 @@ func (s Service) Fix(findings []DoctorFinding) ([]FixResult, error) {
 	results := make([]FixResult, len(findings))
 	for i, finding := range findings {
 		results[i] = FixResult{Finding: finding}
-		if finding.Kind == FindingKindUnmanagedTarget {
+		if finding.Kind == FindingKindUnmanagedTarget ||
+			(finding.Kind == FindingKindUnexpectedEntryType && finding.Skill == "" && finding.TargetName != "") {
 			results[i].Note = "manual intervention required"
 		}
 	}
