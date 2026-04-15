@@ -214,6 +214,13 @@ func splitGitSpec(spec string) (gitURL string, ref string) {
 					return spec, ""
 				}
 			}
+		} else if colon := strings.Index(suffix, ":"); colon > 0 && colon < len(suffix)-1 {
+			host := suffix[:colon]
+			path := suffix[colon+1:]
+			if !strings.Contains(host, "/") && strings.Contains(path, "/") {
+				// Treat this as SCP-style URL userinfo (e.g., git@host:path), not @ref.
+				return spec, ""
+			}
 		}
 	}
 

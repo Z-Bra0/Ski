@@ -49,6 +49,17 @@ func TestParseGit(t *testing.T) {
 			wantRef: "a1b2c3d",
 		},
 		{
+			name:    "scp style without explicit ref",
+			raw:     "git:git@github.com:acme/repo-map.git",
+			wantURL: "git@github.com:acme/repo-map.git",
+		},
+		{
+			name:       "scp style without ref with selectors",
+			raw:        "git:git@github.com:acme/repo-map.git##alpha-skill",
+			wantURL:    "git@github.com:acme/repo-map.git",
+			wantSkills: []string{"alpha-skill"},
+		},
+		{
 			name:    "ssh scheme userinfo without ref",
 			raw:     "git:ssh://git@github.com/acme/repo-map.git",
 			wantURL: "ssh://git@github.com/acme/repo-map.git",
