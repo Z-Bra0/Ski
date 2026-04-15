@@ -34,6 +34,21 @@ type RepoResult struct {
 	InvalidSkills []InvalidSkill
 }
 
+// SnapshotSymlinkError reports that a store snapshot tree contains symlinks,
+// which are disallowed in skill trees.
+type SnapshotSymlinkError struct {
+	Root string
+	Err  error
+}
+
+func (e SnapshotSymlinkError) Error() string {
+	return fmt.Sprintf("store snapshot %s contains symlink entries: %v", e.Root, e.Err)
+}
+
+func (e SnapshotSymlinkError) Unwrap() error {
+	return e.Err
+}
+
 // DiscoveredSkill identifies one skill directory inside a repository snapshot.
 type DiscoveredSkill struct {
 	Name         string
@@ -121,6 +136,12 @@ func discoverGit(projectRoot, homeDir string, spec source.Git, forceRefresh bool
 	skills, invalidSkills, err := discoverSkills(checkoutDir)
 	if err != nil {
 		return RepoResult{}, err
+	}
+	if _, err := HashDir(checkoutDir); err != nil {
+		if errors.Is(err, fsutil.ErrSymlinkNotPermitted) {
+			return RepoResult{}, fmt.Errorf("repository snapshot contains symlink entries: %w", err)
+		}
+		return RepoResult{}, fmt.Errorf("hash %s: %w", checkoutDir, err)
 	}
 	if len(skills) == 0 {
 		if len(invalidSkills) > 0 {
@@ -249,7 +270,7 @@ func EnsureGitWithWarnings(projectRoot, homeDir string, spec source.Git, expecte
 	} else {
 		integrity, err := HashDir(repo.Root)
 		if err != nil {
-			return Result{}, nil, fmt.Errorf("hash %s: %w", repo.Root, err)
+			return Result{}, nil, formatStoreHashError(repo.Root, err)
 		}
 
 		return Result{Commit: repo.Commit, Integrity: integrity, Path: selected.Path}, warnings, nil
@@ -275,7 +296,7 @@ func FindGit(homeDir string, spec source.Git, commit string, expectedName string
 
 	integrity, err := HashDir(repo.Root)
 	if err != nil {
-		return Result{}, fmt.Errorf("hash %s: %w", repo.Root, err)
+		return Result{}, formatStoreHashError(repo.Root, err)
 	}
 
 	return Result{Commit: commit, Integrity: integrity, Path: selected.Path}, nil
@@ -588,6 +609,13 @@ func moveDirIntoStore(src, dst string) error {
 // HashDir returns the canonical SHA-256 hash for a stored snapshot directory.
 func HashDir(root string) (string, error) {
 	return fsutil.HashDir(root)
+}
+
+func formatStoreHashError(root string, err error) error {
+	if errors.Is(err, fsutil.ErrSymlinkNotPermitted) {
+		return SnapshotSymlinkError{Root: root, Err: err}
+	}
+	return fmt.Errorf("hash %s: %w", root, err)
 }
 
 func runGit(dir string, args ...string) error {

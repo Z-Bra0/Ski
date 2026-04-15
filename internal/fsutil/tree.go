@@ -3,6 +3,7 @@ package fsutil
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,10 @@ import (
 	"slices"
 	"strings"
 )
+
+// ErrSymlinkNotPermitted is returned by HashDir and CopyTree when a symlink is
+// encountered. Skill trees must contain only regular files and directories.
+var ErrSymlinkNotPermitted = errors.New("symlink not permitted in skill trees")
 
 // HashDir returns a canonical SHA-256 hash for a directory tree.
 func HashDir(root string) (string, error) {
@@ -49,13 +54,7 @@ func hashDir(w io.Writer, absPath, relPath string) error {
 				return err
 			}
 		case info.Mode()&os.ModeSymlink != 0:
-			target, err := os.Readlink(childAbs)
-			if err != nil {
-				return err
-			}
-			if _, err := io.WriteString(w, "symlink\x00"+childRel+"\x00"+target+"\x00"); err != nil {
-				return err
-			}
+			return fmt.Errorf("%q: %w", childAbs, ErrSymlinkNotPermitted)
 		default:
 			if _, err := io.WriteString(w, "file\x00"+childRel+"\x00"); err != nil {
 				return err
@@ -76,7 +75,9 @@ func hashDir(w io.Writer, absPath, relPath string) error {
 	return nil
 }
 
-// CopyTree copies a directory tree, preserving permissions and symlinks.
+// CopyTree copies a directory tree, preserving file permissions.
+// Symlinks are rejected: skill trees must contain only regular files and
+// directories to prevent symlink-escape attacks.
 func CopyTree(src, dst string) error {
 	info, err := os.Lstat(src)
 	if err != nil {
@@ -98,29 +99,23 @@ func CopyTree(src, dst string) error {
 		srcPath := filepath.Join(src, entry.Name())
 		dstPath := filepath.Join(dst, entry.Name())
 
-		info, err := os.Lstat(srcPath)
+		entryInfo, err := os.Lstat(srcPath)
 		if err != nil {
 			return err
 		}
 
 		switch {
-		case info.Mode()&os.ModeSymlink != 0:
-			target, err := os.Readlink(srcPath)
-			if err != nil {
-				return err
-			}
-			if err := os.Symlink(target, dstPath); err != nil {
-				return err
-			}
-		case info.IsDir():
+		case entryInfo.Mode()&os.ModeSymlink != 0:
+			return fmt.Errorf("%q: %w", srcPath, ErrSymlinkNotPermitted)
+		case entryInfo.IsDir():
 			if err := CopyTree(srcPath, dstPath); err != nil {
 				return err
 			}
-			if err := os.Chmod(dstPath, info.Mode().Perm()); err != nil {
+			if err := os.Chmod(dstPath, entryInfo.Mode().Perm()); err != nil {
 				return err
 			}
 		default:
-			if err := copyFile(srcPath, dstPath, info.Mode().Perm()); err != nil {
+			if err := copyFile(srcPath, dstPath, entryInfo.Mode().Perm()); err != nil {
 				return err
 			}
 		}
