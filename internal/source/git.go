@@ -20,6 +20,8 @@ var skillSelectorPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 var storeKeyUnsafePattern = regexp.MustCompile(`[^a-z0-9._-]+`)
 var storeKeyDashPattern = regexp.MustCompile(`-+`)
 
+var resolveGit = ResolveGit
+
 // NoMatchingRevisionError reports that a requested git ref resolved to no revision.
 type NoMatchingRevisionError struct {
 	Ref string
@@ -81,6 +83,9 @@ func ParseGit(raw string) (Git, error) {
 	ref = unescapeGitComponent(ref)
 	if !isSupportedRemoteGitURL(gitURL) {
 		return Git{}, fmt.Errorf("unsupported source %q: local filesystem git sources are not supported", raw)
+	}
+	if err := validateGitRef(ref); err != nil {
+		return Git{}, fmt.Errorf("invalid git source %q: %w", raw, err)
 	}
 
 	skills, err := parseSkillSelectors(selectors)
@@ -197,12 +202,35 @@ func splitGitSpec(spec string) (gitURL string, ref string) {
 		return spec, ""
 	}
 
+	prefix := spec[:at]
 	suffix := spec[at+1:]
 	if strings.Contains(suffix, "/") {
-		return spec, ""
+		if scheme := strings.Index(spec, "://"); scheme >= 0 {
+			authorityStart := scheme + len("://")
+			if slash := strings.Index(spec[authorityStart:], "/"); slash >= 0 {
+				authorityEnd := authorityStart + slash
+				if at < authorityEnd {
+					// Treat this as URL userinfo (e.g., ssh://git@host/path), not @ref.
+					return spec, ""
+				}
+			}
+		}
 	}
 
-	return spec[:at], suffix
+	return prefix, suffix
+}
+
+func validateGitRef(ref string) error {
+	if ref == "" {
+		return nil
+	}
+	if strings.Contains(ref, "/") {
+		return fmt.Errorf("refs containing '/' are unsupported")
+	}
+	if strings.HasPrefix(ref, "-") {
+		return fmt.Errorf("refs must not start with '-'")
+	}
+	return nil
 }
 
 func splitSkillSelectors(spec string) (base string, selectors string, hasSelector bool) {
@@ -321,28 +349,28 @@ func ResolveGitInfo(dir string, spec Git) (ResolveInfo, error) {
 		}, nil
 	}
 
-	commit, err := ResolveGit(dir, spec)
-	if err == nil {
-		latestAt, err := resolveGitCommitDate(spec.URL, commit, spec.Ref)
+	if len(spec.Ref) == 40 && IsCommitRef(spec.Ref) {
+		latestAt, err := resolveGitCommitDate(spec.URL, spec.Ref, spec.Ref)
 		if err != nil {
 			return ResolveInfo{}, err
 		}
 		return ResolveInfo{
-			Commit:   commit,
+			Commit:   spec.Ref,
 			Tracking: spec.Ref,
 			LatestAt: latestAt,
 		}, nil
 	}
-	if !IsCommitRef(spec.Ref) {
+
+	commit, err := resolveGit(dir, spec)
+	if err != nil {
 		return ResolveInfo{}, err
 	}
-
-	latestAt, err := resolveGitCommitDate(spec.URL, spec.Ref, spec.Ref)
+	latestAt, err := resolveGitCommitDate(spec.URL, commit, spec.Ref)
 	if err != nil {
 		return ResolveInfo{}, err
 	}
 	return ResolveInfo{
-		Commit:   spec.Ref,
+		Commit:   commit,
 		Tracking: spec.Ref,
 		LatestAt: latestAt,
 	}, nil

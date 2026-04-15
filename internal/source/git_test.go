@@ -106,6 +106,16 @@ func TestParseGit(t *testing.T) {
 			raw:     "git:https://github.com/acme/repo-map.git##bad_name",
 			wantErr: "invalid skill selector",
 		},
+		{
+			name:    "reject slash in ref",
+			raw:     "git:https://github.com/acme/repo-map.git@release/2026-q1",
+			wantErr: "refs containing '/' are unsupported",
+		},
+		{
+			name:    "reject ref starting with dash",
+			raw:     "git:https://github.com/acme/repo-map.git@-ccore.sshCommand=malicious",
+			wantErr: "refs must not start with '-'",
+		},
 	}
 
 	for _, tc := range tests {
@@ -414,6 +424,30 @@ func TestResolveGitInfoExplicitRefReportsTrackingAndDate(t *testing.T) {
 				t.Fatalf("ResolveGitInfo().LatestAt = %q, want %q", info.LatestAt, wantDate)
 			}
 		})
+	}
+}
+
+func TestResolveGitInfoCommitRefSkipsResolveGit(t *testing.T) {
+	repo := testutil.NewSkillRepo(t, "repo-map", "repo-map")
+
+	originalResolveGit := resolveGit
+	resolveGit = func(dir string, spec Git) (string, error) {
+		t.Fatal("resolveGit() should not be called for commit refs")
+		return "", nil
+	}
+	t.Cleanup(func() {
+		resolveGit = originalResolveGit
+	})
+
+	info, err := ResolveGitInfo(repo.Path, Git{URL: repo.URL, Ref: repo.Commit})
+	if err != nil {
+		t.Fatalf("ResolveGitInfo() error = %v", err)
+	}
+	if info.Commit != repo.Commit {
+		t.Fatalf("ResolveGitInfo().Commit = %q, want %q", info.Commit, repo.Commit)
+	}
+	if info.Tracking != repo.Commit {
+		t.Fatalf("ResolveGitInfo().Tracking = %q, want %q", info.Tracking, repo.Commit)
 	}
 }
 
