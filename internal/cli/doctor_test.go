@@ -46,6 +46,97 @@ func TestDoctorReportsHealthyProject(t *testing.T) {
 	}
 }
 
+func TestDoctorReportsUnmanagedLocalTargetEntry(t *testing.T) {
+	t.Parallel()
+
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	if err := manifest.WriteFile(filepath.Join(projectDir, manifest.FileName), manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills:  []manifest.Skill{},
+	}); err != nil {
+		t.Fatalf("WriteFile(manifest) error = %v", err)
+	}
+
+	unmanagedPath := filepath.Join(projectDir, ".claude", "skills", "manual-skill")
+	if err := os.MkdirAll(unmanagedPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll(unmanagedPath) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(unmanagedPath, "SKILL.md"), []byte("---\nname: manual-skill\ndescription: manual\n---\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(SKILL.md) error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	doctorCmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &stdout,
+		Stderr:     &bytes.Buffer{},
+	})
+	doctorCmd.SetArgs([]string{"doctor"})
+	err := doctorCmd.Execute()
+	if err == nil {
+		t.Fatal("doctor Execute() error = nil, want unmanaged finding")
+	}
+	if !strings.Contains(err.Error(), "doctor found 1 issues") {
+		t.Fatalf("doctor error = %v, want issue summary", err)
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "unmanaged claude target") {
+		t.Fatalf("stdout = %q, want unmanaged target finding", out)
+	}
+}
+
+func TestDoctorFixReportsManualInterventionForUnmanagedLocalTargetEntry(t *testing.T) {
+	t.Parallel()
+
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	if err := manifest.WriteFile(filepath.Join(projectDir, manifest.FileName), manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills:  []manifest.Skill{},
+	}); err != nil {
+		t.Fatalf("WriteFile(manifest) error = %v", err)
+	}
+
+	unmanagedPath := filepath.Join(projectDir, ".claude", "skills", "manual-skill")
+	if err := os.MkdirAll(unmanagedPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll(unmanagedPath) error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	doctorCmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &stdout,
+		Stderr:     &bytes.Buffer{},
+	})
+	doctorCmd.SetArgs([]string{"doctor", "--fix"})
+	err := doctorCmd.Execute()
+	if err == nil {
+		t.Fatal("doctor --fix Execute() error = nil, want manual intervention error")
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "unmanaged claude target") {
+		t.Fatalf("stdout = %q, want unmanaged target finding", out)
+	}
+	if !strings.Contains(out, "skipped: manual intervention required") {
+		t.Fatalf("stdout = %q, want skipped output", out)
+	}
+	if !strings.Contains(out, "doctor: fixed 0 issues, 1 require manual intervention") {
+		t.Fatalf("stdout = %q, want manual summary", out)
+	}
+	if _, err := os.Stat(unmanagedPath); err != nil {
+		t.Fatalf("Stat(unmanagedPath) error = %v, want entry kept", err)
+	}
+}
+
 func TestDoctorReportsHealthyGlobalScope(t *testing.T) {
 	t.Parallel()
 
@@ -74,6 +165,12 @@ func TestDoctorReportsHealthyGlobalScope(t *testing.T) {
 	addCmd.SetArgs([]string{"add", "-g", "git:" + repoPath})
 	if err := addCmd.Execute(); err != nil {
 		t.Fatalf("add Execute() error = %v", err)
+	}
+
+	// Local unmanaged entry should not affect global doctor.
+	localUnmanagedPath := filepath.Join(projectDir, ".claude", "skills", "manual-skill")
+	if err := os.MkdirAll(localUnmanagedPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll(localUnmanagedPath) error = %v", err)
 	}
 
 	var stdout bytes.Buffer
@@ -126,6 +223,59 @@ func TestDoctorSupportsCustomTargetFolder(t *testing.T) {
 
 	if got := stdout.String(); !strings.Contains(got, "doctor: ok") {
 		t.Fatalf("stdout = %q, want healthy doctor output", got)
+	}
+}
+
+func TestDoctorReportsUnmanagedEntryInLockOnlyCustomTargetFolder(t *testing.T) {
+	t.Parallel()
+
+	repoPath, _ := createGitRepo(t, "repo-map", "repo-map")
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+	customTarget := "dir:./agent-skills/claude"
+
+	installManifestForTest(t, projectDir, homeDir, manifest.Manifest{
+		Version: 1,
+		Targets: []string{customTarget},
+		Skills: []manifest.Skill{
+			{
+				Name:   "repo-map",
+				Source: "git:" + repoPath + "@v1.0.0",
+			},
+		},
+	})
+
+	manifestPath := filepath.Join(projectDir, manifest.FileName)
+	if err := manifest.WriteFile(manifestPath, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills:  []manifest.Skill{},
+	}); err != nil {
+		t.Fatalf("WriteFile(updated manifest) error = %v", err)
+	}
+
+	unmanagedPath := filepath.Join(projectDir, "agent-skills", "claude", "manual-skill")
+	if err := os.MkdirAll(unmanagedPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll(unmanagedPath) error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	doctorCmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &stdout,
+		Stderr:     &bytes.Buffer{},
+	})
+	doctorCmd.SetArgs([]string{"doctor"})
+
+	err := doctorCmd.Execute()
+	if err == nil {
+		t.Fatal("doctor Execute() error = nil, want findings")
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "unmanaged dir:./agent-skills/claude target") {
+		t.Fatalf("stdout = %q, want unmanaged custom target finding", out)
 	}
 }
 

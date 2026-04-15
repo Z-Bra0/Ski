@@ -4,11 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 
 	"github.com/Z-Bra0/Ski/internal/lockfile"
 	"github.com/Z-Bra0/Ski/internal/manifest"
 	"github.com/Z-Bra0/Ski/internal/store"
+	"github.com/Z-Bra0/Ski/internal/target"
 )
 
 const (
@@ -24,6 +26,7 @@ const (
 	FindingKindDriftedTarget        = "drifted_target"
 	FindingKindUnexpectedTarget     = "unexpected_target"
 	FindingKindUnexpectedEntryType  = "unexpected_entry_type"
+	FindingKindUnmanagedTarget      = "unmanaged_target"
 )
 
 // DoctorFinding describes one inconsistency found by Service.Doctor.
@@ -84,6 +87,8 @@ func (s Service) Doctor() ([]DoctorFinding, error) {
 			Message: "lockfile entry exists but skill is not declared in ski.toml",
 		})
 	}
+
+	findings = append(findings, s.doctorUnmanagedLocalTargets(doc, manifestNames, lockByName)...)
 
 	return findings, nil
 }
@@ -178,6 +183,68 @@ func classifyStoreFinding(skillName string, err error) []DoctorFinding {
 		Skill:   skillName,
 		Message: err.Error(),
 	}}
+}
+
+func (s Service) doctorUnmanagedLocalTargets(doc *manifest.Manifest, manifestNames map[string]struct{}, lockByName map[string]lockfile.Skill) []DoctorFinding {
+	if s.Global {
+		return nil
+	}
+
+	targetNames := append([]string(nil), target.BuiltInNames()...)
+	targetNames = unionStrings(targetNames, doc.Targets)
+	for _, skill := range doc.Skills {
+		targetNames = unionStrings(targetNames, skill.Targets)
+	}
+	for _, locked := range lockByName {
+		targetNames = unionStrings(targetNames, locked.Targets)
+	}
+
+	findings := make([]DoctorFinding, 0)
+	seenDirs := make(map[string]struct{}, len(targetNames))
+	for _, targetName := range targetNames {
+		dir, err := s.skillDir(targetName)
+		if err != nil {
+			continue
+		}
+		if _, ok := seenDirs[dir]; ok {
+			continue
+		}
+		seenDirs[dir] = struct{}{}
+
+		entries, err := os.ReadDir(dir)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			findings = append(findings, DoctorFinding{
+				Kind:       FindingKindUnexpectedEntryType,
+				Message:    fmt.Sprintf("read %s: %v", dir, err),
+				TargetName: targetName,
+			})
+			continue
+		}
+
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			skillName := entry.Name()
+			if _, ok := manifestNames[skillName]; ok {
+				continue
+			}
+			if _, ok := lockByName[skillName]; ok {
+				continue
+			}
+			findings = append(findings, DoctorFinding{
+				Kind:       FindingKindUnmanagedTarget,
+				Skill:      skillName,
+				TargetName: targetName,
+				Message:    fmt.Sprintf("unmanaged %s target at %s", targetName, filepath.Join(dir, skillName)),
+			})
+		}
+	}
+
+	return findings
 }
 
 func (s Service) doctorTargetFindings(skillName, targetName, storePath string, shouldExist bool) []DoctorFinding {

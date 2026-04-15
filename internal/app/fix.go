@@ -44,6 +44,9 @@ func (s Service) Fix(findings []DoctorFinding) ([]FixResult, error) {
 	results := make([]FixResult, len(findings))
 	for i, finding := range findings {
 		results[i] = FixResult{Finding: finding}
+		if finding.Kind == FindingKindUnmanagedTarget {
+			results[i].Note = "manual intervention required"
+		}
 	}
 
 	nextLock := cloneLockfile(*lf)
