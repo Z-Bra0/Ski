@@ -260,6 +260,7 @@ In local scope, `ski doctor` also scans project-local target directories and rep
 - removes orphaned lockfile entries
 - updates lockfile source, upstream skill, targets, and integrity fields to match current manifest or refreshed store state
 - refetches missing or invalid store snapshots for pinned commits
+- removes and refetches store snapshots that contain symlinks
 - materializes missing target installs
 - replaces drifted managed target directories with the locked store snapshot
 - removes unexpected managed target directories

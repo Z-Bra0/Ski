@@ -567,6 +567,56 @@ func TestDoctorFixRepairsMissingTargetInstall(t *testing.T) {
 	}
 }
 
+func TestDoctorFixRepairsStoreSymlinkSnapshot(t *testing.T) {
+	t.Parallel()
+
+	repoPath, commit := createGitRepo(t, "repo-map", "repo-map")
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+
+	installManifestForTest(t, projectDir, homeDir, manifest.Manifest{
+		Version: 1,
+		Targets: []string{"claude"},
+		Skills: []manifest.Skill{
+			{
+				Name:   "repo-map",
+				Source: "git:" + repoPath + "@v1.0.0",
+			},
+		},
+	})
+
+	storeRoot := filepath.Join(homeDir, ".ski", "store", "git", "repo-map", commit)
+	if err := os.Symlink("SKILL.md", filepath.Join(storeRoot, "poison-link")); err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "operation not permitted") {
+			t.Skipf("symlink not permitted on this filesystem: %v", err)
+		}
+		t.Fatalf("Symlink(poison-link) error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	doctorCmd := NewRootCmd(Options{
+		Getwd:      func() (string, error) { return projectDir, nil },
+		GetHomeDir: func() (string, error) { return homeDir, nil },
+		Stdout:     &stdout,
+		Stderr:     &bytes.Buffer{},
+	})
+	doctorCmd.SetArgs([]string{"doctor", "--fix"})
+	if err := doctorCmd.Execute(); err != nil {
+		t.Fatalf("doctor --fix Execute() error = %v", err)
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "contains symlink entries") {
+		t.Fatalf("stdout = %q, want symlink store finding", out)
+	}
+	if !strings.Contains(out, "removed symlink-containing store snapshot and refreshed it") {
+		t.Fatalf("stdout = %q, want symlink repair note", out)
+	}
+	if !strings.Contains(out, "doctor: fixed 1 issues") {
+		t.Fatalf("stdout = %q, want fixed summary", out)
+	}
+}
+
 func TestDoctorFixReportsManualInterventionForUnexpectedSymlinkEntry(t *testing.T) {
 	t.Parallel()
 

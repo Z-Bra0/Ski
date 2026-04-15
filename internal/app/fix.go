@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 
@@ -228,17 +229,21 @@ func (s Service) repairStoreAndTargets(state fixSkillState, nextLock *lockfile.L
 	needsRefresh := hasAnyFinding(findings, indexes,
 		FindingKindStoreMissing,
 		FindingKindStoreInvalid,
+		FindingKindStoreSymlink,
 		FindingKindStoreIntegrity,
 	)
 
 	var stored store.Result
 	var err error
 	if needsRefresh {
+		if err := s.removeStoreSymlinkSnapshots(findings, results, indexes); err != nil {
+			return lockChanged, err
+		}
 		stored, err = s.refreshLockedSkill(lockEntry, state.manifestSkill.Name)
 		if err != nil {
 			for _, idx := range indexes {
 				switch findings[idx].Kind {
-				case FindingKindStoreMissing, FindingKindStoreInvalid, FindingKindStoreIntegrity:
+				case FindingKindStoreMissing, FindingKindStoreInvalid, FindingKindStoreSymlink, FindingKindStoreIntegrity:
 					results[idx].Err = err
 				}
 			}
@@ -256,6 +261,9 @@ func (s Service) repairStoreAndTargets(state fixSkillState, nextLock *lockfile.L
 			case FindingKindStoreInvalid:
 				results[idx].Fixed = true
 				results[idx].Note = "refreshed invalid store snapshot"
+			case FindingKindStoreSymlink:
+				results[idx].Fixed = true
+				results[idx].Note = "removed symlink-containing store snapshot and refreshed it"
 			case FindingKindStoreIntegrity:
 				results[idx].Fixed = true
 				results[idx].Note = "refreshed store snapshot and updated integrity"
@@ -305,6 +313,33 @@ func (s Service) repairStoreAndTargets(state fixSkillState, nextLock *lockfile.L
 	}
 
 	return lockChanged, nil
+}
+
+func (s Service) removeStoreSymlinkSnapshots(findings []DoctorFinding, results []FixResult, indexes []int) error {
+	removed := make(map[string]struct{})
+	for _, idx := range indexes {
+		if findings[idx].Kind != FindingKindStoreSymlink {
+			continue
+		}
+		storePath := findings[idx].StorePath
+		if storePath == "" {
+			results[idx].Note = "manual intervention required"
+			continue
+		}
+		if _, ok := removed[storePath]; ok {
+			continue
+		}
+		if err := os.RemoveAll(storePath); err != nil {
+			for _, j := range indexes {
+				if findings[j].Kind == FindingKindStoreSymlink && findings[j].StorePath == storePath {
+					results[j].Err = err
+				}
+			}
+			return nil
+		}
+		removed[storePath] = struct{}{}
+	}
+	return nil
 }
 
 func collectTargetNames(expectedTargets []string, findings []DoctorFinding, indexes []int) []string {

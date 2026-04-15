@@ -21,6 +21,7 @@ const (
 	FindingKindTargetsMismatch      = "targets_mismatch"
 	FindingKindStoreMissing         = "store_missing"
 	FindingKindStoreInvalid         = "store_invalid"
+	FindingKindStoreSymlink         = "store_symlink"
 	FindingKindStoreIntegrity       = "store_integrity"
 	FindingKindMissingTargetInstall = "missing_target_install"
 	FindingKindDriftedTarget        = "drifted_target"
@@ -178,13 +179,20 @@ func (s Service) doctorSkillFindings(doc *manifest.Manifest, skill manifest.Skil
 
 func classifyStoreFinding(skillName string, err error) []DoctorFinding {
 	kind := FindingKindStoreInvalid
+	storePath := ""
 	if errors.Is(err, os.ErrNotExist) {
 		kind = FindingKindStoreMissing
 	}
+	var symlinkErr store.SnapshotSymlinkError
+	if errors.As(err, &symlinkErr) {
+		kind = FindingKindStoreSymlink
+		storePath = symlinkErr.Root
+	}
 	return []DoctorFinding{{
-		Kind:    kind,
-		Skill:   skillName,
-		Message: err.Error(),
+		Kind:      kind,
+		Skill:     skillName,
+		Message:   err.Error(),
+		StorePath: storePath,
 	}}
 }
 
