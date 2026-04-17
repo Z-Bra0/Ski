@@ -252,15 +252,19 @@ Shows detailed state for one declared skill in the active scope, including enabl
 
 Checks the active scope for drifted, missing, and otherwise inconsistent target installs alongside manifest, lockfile, and store state.
 
+In local scope, `ski doctor` also scans project-local target directories and reports unmanaged skill directories that are not declared in `ski.toml` and not present in the local lockfile.
+
 `ski doctor --fix` repairs safe issues in place:
 
 - recreates missing lockfile entries from the manifest
 - removes orphaned lockfile entries
 - updates lockfile source, upstream skill, targets, and integrity fields to match current manifest or refreshed store state
 - refetches missing or invalid store snapshots for pinned commits
+- removes and refetches store snapshots that contain symlinks
 - materializes missing target installs
 - replaces drifted managed target directories with the locked store snapshot
 - removes unexpected managed target directories
+- leaves unmanaged local target directories unchanged and reports them for manual intervention
 
 `ski doctor --fix` repairs safe issues in place and exits non-zero if any issues remain after the repair pass.
 

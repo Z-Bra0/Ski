@@ -1,8 +1,10 @@
 package lockfile
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 )
@@ -41,7 +43,15 @@ func Default() Lockfile {
 // Parse decodes and validates a lockfile from raw bytes.
 func Parse(data []byte) (*Lockfile, error) {
 	var lf Lockfile
-	if err := json.Unmarshal(data, &lf); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&lf); err != nil {
+		return nil, err
+	}
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("unexpected trailing data in lockfile")
+		}
 		return nil, err
 	}
 	if err := lf.Validate(); err != nil {

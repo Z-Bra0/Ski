@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/Z-Bra0/Ski/internal/fsutil"
 	"github.com/Z-Bra0/Ski/internal/source"
 	"github.com/Z-Bra0/Ski/internal/testutil"
 )
@@ -29,8 +31,8 @@ func TestMoveDirIntoStoreFallsBackOnCrossDeviceRename(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(src, "nested", "helper.sh"), []byte("echo helper\n"), 0o755); err != nil {
 		t.Fatalf("WriteFile(helper.sh) error = %v", err)
 	}
-	if err := os.Symlink("nested/helper.sh", filepath.Join(src, "helper")); err != nil {
-		t.Fatalf("Symlink() error = %v", err)
+	if err := os.WriteFile(filepath.Join(src, "helper.md"), []byte("helper notes\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(helper.md) error = %v", err)
 	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		t.Fatalf("MkdirAll(store parent) error = %v", err)
@@ -73,12 +75,12 @@ func TestMoveDirIntoStoreFallsBackOnCrossDeviceRename(t *testing.T) {
 		t.Fatalf("helper.sh perms = %#o, want 0755", info.Mode().Perm())
 	}
 
-	linkTarget, err := os.Readlink(filepath.Join(dst, "helper"))
+	helperData, err := os.ReadFile(filepath.Join(dst, "helper.md"))
 	if err != nil {
-		t.Fatalf("Readlink(helper) error = %v", err)
+		t.Fatalf("ReadFile(helper.md) error = %v", err)
 	}
-	if linkTarget != "nested/helper.sh" {
-		t.Fatalf("helper symlink target = %q, want nested/helper.sh", linkTarget)
+	if string(helperData) != "helper notes\n" {
+		t.Fatalf("helper.md = %q, want preserved content", string(helperData))
 	}
 }
 
@@ -180,6 +182,78 @@ description: [unterminated
 	}
 	if !strings.Contains(err.Error(), filepath.Join(homeDir, ".ski", "store", "git", "skill-pack")) {
 		t.Fatalf("DiscoverGit() error = %v, want stable store path", err)
+	}
+}
+
+func TestDiscoverGitRejectsSymlinkBeforePersistingSnapshot(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	repoPath := filepath.Join(root, "skill-pack")	
+	writeSkillDir(t, filepath.Join(repoPath, "skills", "alpha-skill"), "alpha-skill")
+	if err := os.Symlink("skills/alpha-skill/SKILL.md", filepath.Join(repoPath, "symlinked-skill")); err != nil {
+		if errors.Is(err, syscall.EPERM) {
+			t.Skipf("symlink not permitted on this filesystem: %v", err)
+		}
+		t.Fatalf("Symlink() error = %v", err)
+	}
+	runGitTest(t, root, "init", repoPath)
+	runGitTest(t, repoPath, "add", ".")
+	runGitTest(t, repoPath, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "add symlink")
+
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+	spec := source.Git{URL: repoPath}
+
+	_, err := DiscoverGit(projectDir, homeDir, spec)
+	if err == nil {
+		t.Fatal("DiscoverGit() error = nil, want symlink rejection")
+	}
+	if !errors.Is(err, fsutil.ErrSymlinkNotPermitted) {
+		t.Fatalf("DiscoverGit() error = %v, want ErrSymlinkNotPermitted", err)
+	}
+
+	commit := strings.TrimSpace(gitOutputTest(t, repoPath, "rev-parse", "HEAD"))
+	storePath := filepath.Join(homeDir, ".ski", "store", "git", "skill-pack", commit)
+	if _, statErr := os.Stat(storePath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("store path %s should not exist after symlink rejection, stat err = %v", storePath, statErr)
+	}
+}
+
+func TestFindGitReturnsSnapshotSymlinkErrorWithStorePath(t *testing.T) {
+	t.Parallel()
+
+	repoPath := createMultiSkillRepoWithSharedFile(t)
+	projectDir := t.TempDir()
+	homeDir := t.TempDir()
+	spec := source.Git{URL: repoPath, Skills: []string{"alpha-skill"}}
+
+	stored, err := EnsureGit(projectDir, homeDir, spec, "alpha-skill")
+	if err != nil {
+		t.Fatalf("EnsureGit() error = %v", err)
+	}
+
+	poisoned := filepath.Join(homeDir, ".ski", "store", "git", "skill-pack", stored.Commit, "poison-link")
+	if err := os.Symlink("shared.txt", poisoned); err != nil {
+		if errors.Is(err, syscall.EPERM) {
+			t.Skipf("symlink not permitted on this filesystem: %v", err)
+		}
+		t.Fatalf("Symlink() error = %v", err)
+	}
+
+	_, err = FindGit(homeDir, spec, stored.Commit, "alpha-skill")
+	if err == nil {
+		t.Fatal("FindGit() error = nil, want SnapshotSymlinkError")
+	}
+	var symlinkErr SnapshotSymlinkError
+	if !errors.As(err, &symlinkErr) {
+		t.Fatalf("FindGit() error = %v, want SnapshotSymlinkError", err)
+	}
+	if symlinkErr.Root != filepath.Join(homeDir, ".ski", "store", "git", "skill-pack", stored.Commit) {
+		t.Fatalf("SnapshotSymlinkError.Root = %q", symlinkErr.Root)
+	}
+	if !errors.Is(err, fsutil.ErrSymlinkNotPermitted) {
+		t.Fatalf("FindGit() error = %v, want ErrSymlinkNotPermitted", err)
 	}
 }
 
@@ -324,4 +398,16 @@ func runGitTest(t *testing.T, dir string, args ...string) {
 	if err != nil {
 		t.Fatalf("git %v error = %v\n%s", args, err, strings.TrimSpace(string(output)))
 	}
+}
+
+func gitOutputTest(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v error = %v\n%s", args, err, strings.TrimSpace(string(output)))
+	}
+	return string(output)
 }

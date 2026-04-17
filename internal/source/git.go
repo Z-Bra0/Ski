@@ -20,6 +20,8 @@ var skillSelectorPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 var storeKeyUnsafePattern = regexp.MustCompile(`[^a-z0-9._-]+`)
 var storeKeyDashPattern = regexp.MustCompile(`-+`)
 
+var resolveGit = ResolveGit
+
 // NoMatchingRevisionError reports that a requested git ref resolved to no revision.
 type NoMatchingRevisionError struct {
 	Ref string
@@ -48,6 +50,7 @@ type ResolveInfo struct {
 	Commit   string
 	Tracking string
 	LatestAt string
+	Pinned   bool
 }
 
 // ParseGit parses a canonical git: source or a bare remote git URL.
@@ -81,6 +84,9 @@ func ParseGit(raw string) (Git, error) {
 	ref = unescapeGitComponent(ref)
 	if !isSupportedRemoteGitURL(gitURL) {
 		return Git{}, fmt.Errorf("unsupported source %q: local filesystem git sources are not supported", raw)
+	}
+	if err := validateGitRef(ref); err != nil {
+		return Git{}, fmt.Errorf("invalid git source %q: %w", raw, err)
 	}
 
 	skills, err := parseSkillSelectors(selectors)
@@ -197,12 +203,42 @@ func splitGitSpec(spec string) (gitURL string, ref string) {
 		return spec, ""
 	}
 
+	prefix := spec[:at]
 	suffix := spec[at+1:]
 	if strings.Contains(suffix, "/") {
-		return spec, ""
+		if scheme := strings.Index(spec, "://"); scheme >= 0 {
+			authorityStart := scheme + len("://")
+			if slash := strings.Index(spec[authorityStart:], "/"); slash >= 0 {
+				authorityEnd := authorityStart + slash
+				if at < authorityEnd {
+					// Treat this as URL userinfo (e.g., ssh://git@host/path), not @ref.
+					return spec, ""
+				}
+			}
+		} else if colon := strings.Index(suffix, ":"); colon > 0 && colon < len(suffix)-1 {
+			host := suffix[:colon]
+			path := suffix[colon+1:]
+			if !strings.Contains(host, "/") && strings.Contains(path, "/") {
+				// Treat this as SCP-style URL userinfo (e.g., git@host:path), not @ref.
+				return spec, ""
+			}
+		}
 	}
 
-	return spec[:at], suffix
+	return prefix, suffix
+}
+
+func validateGitRef(ref string) error {
+	if ref == "" {
+		return nil
+	}
+	if strings.Contains(ref, "/") {
+		return fmt.Errorf("refs containing '/' are unsupported")
+	}
+	if strings.HasPrefix(ref, "-") {
+		return fmt.Errorf("refs must not start with '-'")
+	}
+	return nil
 }
 
 func splitSkillSelectors(spec string) (base string, selectors string, hasSelector bool) {
@@ -318,10 +354,11 @@ func ResolveGitInfo(dir string, spec Git) (ResolveInfo, error) {
 			Commit:   commit,
 			Tracking: tracking,
 			LatestAt: latestAt,
+			Pinned:   false,
 		}, nil
 	}
 
-	commit, err := ResolveGit(dir, spec)
+	commit, err := resolveGit(dir, spec)
 	if err == nil {
 		latestAt, err := resolveGitCommitDate(spec.URL, commit, spec.Ref)
 		if err != nil {
@@ -331,9 +368,10 @@ func ResolveGitInfo(dir string, spec Git) (ResolveInfo, error) {
 			Commit:   commit,
 			Tracking: spec.Ref,
 			LatestAt: latestAt,
+			Pinned:   false,
 		}, nil
 	}
-	if !IsCommitRef(spec.Ref) {
+	if !IsCommitRef(spec.Ref) || !IsNoMatchingRevision(err) {
 		return ResolveInfo{}, err
 	}
 
@@ -345,6 +383,7 @@ func ResolveGitInfo(dir string, spec Git) (ResolveInfo, error) {
 		Commit:   spec.Ref,
 		Tracking: spec.Ref,
 		LatestAt: latestAt,
+		Pinned:   true,
 	}, nil
 }
 

@@ -53,8 +53,6 @@ func TestResolveUpdateInfoReturnsErrorForMissingBranch(t *testing.T) {
 }
 
 func TestResolveUpdateInfoFallsBackWhenMetadataLookupFails(t *testing.T) {
-	t.Parallel()
-
 	originalResolveGitCommit := resolveGitCommit
 	originalResolveGitInfo := resolveGitInfo
 	t.Cleanup(func() {
@@ -86,6 +84,71 @@ func TestResolveUpdateInfoFallsBackWhenMetadataLookupFails(t *testing.T) {
 	}
 	if info.LatestAt != "" {
 		t.Fatalf("resolveUpdateInfo().LatestAt = %q, want empty", info.LatestAt)
+	}
+}
+
+func TestResolveUpdateInfoDoesNotResolveCommitWhenMetadataSucceeds(t *testing.T) {
+	originalResolveGitCommit := resolveGitCommit
+	originalResolveGitInfo := resolveGitInfo
+	t.Cleanup(func() {
+		resolveGitCommit = originalResolveGitCommit
+		resolveGitInfo = originalResolveGitInfo
+	})
+
+	resolveGitCommit = func(projectDir string, src source.Git) (string, error) {
+		t.Fatal("resolveGitCommit() should not be called when metadata lookup succeeds")
+		return "", nil
+	}
+	resolveGitInfo = func(projectDir string, src source.Git) (source.ResolveInfo, error) {
+		return source.ResolveInfo{
+			Commit:   "def5678def5678def5678def5678def5678def5",
+			Tracking: "main",
+			LatestAt: "2026-04-14",
+		}, nil
+	}
+
+	info, pinned, err := resolveUpdateInfo(t.TempDir(), source.Git{URL: "https://example.com/repo-map.git"})
+	if err != nil {
+		t.Fatalf("resolveUpdateInfo() error = %v", err)
+	}
+	if pinned {
+		t.Fatal("resolveUpdateInfo() pinned = true, want false")
+	}
+	if info.Commit != "def5678def5678def5678def5678def5678def5" {
+		t.Fatalf("resolveUpdateInfo().Commit = %q, want metadata commit", info.Commit)
+	}
+	if info.Tracking != "main" {
+		t.Fatalf("resolveUpdateInfo().Tracking = %q, want main", info.Tracking)
+	}
+	if info.LatestAt != "2026-04-14" {
+		t.Fatalf("resolveUpdateInfo().LatestAt = %q, want 2026-04-14", info.LatestAt)
+	}
+}
+
+func TestResolveUpdateInfoReturnsCommitErrorWhenBothLookupsFail(t *testing.T) {
+	originalResolveGitCommit := resolveGitCommit
+	originalResolveGitInfo := resolveGitInfo
+	t.Cleanup(func() {
+		resolveGitCommit = originalResolveGitCommit
+		resolveGitInfo = originalResolveGitInfo
+	})
+
+	resolveGitInfo = func(projectDir string, src source.Git) (source.ResolveInfo, error) {
+		return source.ResolveInfo{}, fmt.Errorf("metadata lookup failed")
+	}
+	resolveGitCommit = func(projectDir string, src source.Git) (string, error) {
+		return "", fmt.Errorf("commit lookup failed")
+	}
+
+	_, pinned, err := resolveUpdateInfo(t.TempDir(), source.Git{URL: "https://example.com/repo-map.git"})
+	if err == nil {
+		t.Fatal("resolveUpdateInfo() error = nil, want commit lookup error")
+	}
+	if pinned {
+		t.Fatal("resolveUpdateInfo() pinned = true, want false")
+	}
+	if !strings.Contains(err.Error(), "commit lookup failed") {
+		t.Fatalf("resolveUpdateInfo() error = %q, want commit lookup error", err.Error())
 	}
 }
 

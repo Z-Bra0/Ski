@@ -49,6 +49,17 @@ func TestParseGit(t *testing.T) {
 			wantRef: "a1b2c3d",
 		},
 		{
+			name:    "scp style without explicit ref",
+			raw:     "git:git@github.com:acme/repo-map.git",
+			wantURL: "git@github.com:acme/repo-map.git",
+		},
+		{
+			name:       "scp style without ref with selectors",
+			raw:        "git:git@github.com:acme/repo-map.git##alpha-skill",
+			wantURL:    "git@github.com:acme/repo-map.git",
+			wantSkills: []string{"alpha-skill"},
+		},
+		{
 			name:    "ssh scheme userinfo without ref",
 			raw:     "git:ssh://git@github.com/acme/repo-map.git",
 			wantURL: "ssh://git@github.com/acme/repo-map.git",
@@ -105,6 +116,16 @@ func TestParseGit(t *testing.T) {
 			name:    "invalid selector",
 			raw:     "git:https://github.com/acme/repo-map.git##bad_name",
 			wantErr: "invalid skill selector",
+		},
+		{
+			name:    "reject slash in ref",
+			raw:     "git:https://github.com/acme/repo-map.git@release/2026-q1",
+			wantErr: "refs containing '/' are unsupported",
+		},
+		{
+			name:    "reject ref starting with dash",
+			raw:     "git:https://github.com/acme/repo-map.git@-ccore.sshCommand=malicious",
+			wantErr: "refs must not start with '-'",
 		},
 	}
 
@@ -373,20 +394,24 @@ func TestResolveGitInfoExplicitRefReportsTrackingAndDate(t *testing.T) {
 	repo := testutil.NewSkillRepo(t, "repo-map", "repo-map")
 
 	tests := []struct {
-		name string
-		ref  string
+		name       string
+		ref        string
+		wantPinned bool
 	}{
 		{
-			name: "branch",
-			ref:  strings.TrimSpace(testutil.RunGitOutput(t, repo.Path, "symbolic-ref", "--short", "HEAD")),
+			name:       "branch",
+			ref:        strings.TrimSpace(testutil.RunGitOutput(t, repo.Path, "symbolic-ref", "--short", "HEAD")),
+			wantPinned: false,
 		},
 		{
-			name: "tag",
-			ref:  "v1.0.0",
+			name:       "tag",
+			ref:        "v1.0.0",
+			wantPinned: false,
 		},
 		{
-			name: "commit",
-			ref:  repo.Commit,
+			name:       "commit",
+			ref:        repo.Commit,
+			wantPinned: true,
 		},
 	}
 
@@ -408,12 +433,61 @@ func TestResolveGitInfoExplicitRefReportsTrackingAndDate(t *testing.T) {
 			if info.Commit == "" {
 				t.Fatal("ResolveGitInfo().Commit = empty, want resolved commit")
 			}
+			if info.Pinned != tc.wantPinned {
+				t.Fatalf("ResolveGitInfo().Pinned = %v, want %v", info.Pinned, tc.wantPinned)
+			}
 
 			wantDate := strings.TrimSpace(testutil.RunGitOutput(t, repo.Path, "show", "-s", "--format=%cs", info.Commit))
 			if info.LatestAt != wantDate {
 				t.Fatalf("ResolveGitInfo().LatestAt = %q, want %q", info.LatestAt, wantDate)
 			}
 		})
+	}
+}
+
+func TestResolveGitInfoFortyHexTagResolvesAsRef(t *testing.T) {
+	t.Parallel()
+
+	repo := testutil.NewSkillRepo(t, "repo-map", "repo-map")
+	tag := "0123456789012345678901234567890123456789"
+	testutil.RunGit(t, repo.Path, "tag", tag)
+
+	info, err := ResolveGitInfo(repo.Path, Git{URL: repo.URL, Ref: tag})
+	if err != nil {
+		t.Fatalf("ResolveGitInfo() error = %v", err)
+	}
+	if info.Commit != repo.Commit {
+		t.Fatalf("ResolveGitInfo().Commit = %q, want %q", info.Commit, repo.Commit)
+	}
+	if info.Tracking != tag {
+		t.Fatalf("ResolveGitInfo().Tracking = %q, want %q", info.Tracking, tag)
+	}
+	if info.Pinned {
+		t.Fatal("ResolveGitInfo().Pinned = true, want false")
+	}
+	wantDate := strings.TrimSpace(testutil.RunGitOutput(t, repo.Path, "show", "-s", "--format=%cs", repo.Commit))
+	if info.LatestAt != wantDate {
+		t.Fatalf("ResolveGitInfo().LatestAt = %q, want %q", info.LatestAt, wantDate)
+	}
+}
+
+func TestResolveGitInfoCommitRefIsPinned(t *testing.T) {
+	t.Parallel()
+
+	repo := testutil.NewSkillRepo(t, "repo-map", "repo-map")
+
+	info, err := ResolveGitInfo(repo.Path, Git{URL: repo.URL, Ref: repo.Commit})
+	if err != nil {
+		t.Fatalf("ResolveGitInfo() error = %v", err)
+	}
+	if info.Commit != repo.Commit {
+		t.Fatalf("ResolveGitInfo().Commit = %q, want %q", info.Commit, repo.Commit)
+	}
+	if info.Tracking != repo.Commit {
+		t.Fatalf("ResolveGitInfo().Tracking = %q, want %q", info.Tracking, repo.Commit)
+	}
+	if !info.Pinned {
+		t.Fatal("ResolveGitInfo().Pinned = false, want true")
 	}
 }
 

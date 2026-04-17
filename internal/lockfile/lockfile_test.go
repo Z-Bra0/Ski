@@ -80,6 +80,48 @@ func TestReadFileRejectsInvalidLockfile(t *testing.T) {
 		}
 	})
 
+	t.Run("unknown top-level field", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		path := filepath.Join(dir, FileName)
+		payload := []byte(`{
+  "version": 1,
+  "skills": [],
+  "unexpected": true
+}`)
+		if err := os.WriteFile(path, payload, 0o644); err != nil {
+			t.Fatalf("WriteFile(%q) error = %v", path, err)
+		}
+
+		_, err := ReadFile(path)
+		if err == nil {
+			t.Fatal("ReadFile() error = nil, want error")
+		}
+		if !strings.Contains(err.Error(), "unknown field") {
+			t.Fatalf("ReadFile() error = %q, want substring %q", err.Error(), "unknown field")
+		}
+	})
+
+	t.Run("reject trailing data", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		path := filepath.Join(dir, FileName)
+		payload := []byte(`{"version":1,"skills":[]} garbage`)
+		if err := os.WriteFile(path, payload, 0o644); err != nil {
+			t.Fatalf("WriteFile(%q) error = %v", path, err)
+		}
+
+		_, err := ReadFile(path)
+		if err == nil {
+			t.Fatal("ReadFile() error = nil, want error")
+		}
+		if !strings.Contains(err.Error(), "invalid character") {
+			t.Fatalf("ReadFile() error = %q, want substring %q", err.Error(), "invalid character")
+		}
+	})
+
 	for _, tc := range invalidLockfileCases() {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {

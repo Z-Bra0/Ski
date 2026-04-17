@@ -338,21 +338,20 @@ func (s Service) rollbackUpdate(applied []plannedTargetChanges, lockPath string,
 }
 
 func resolveUpdateInfo(projectDir string, src source.Git) (source.ResolveInfo, bool, error) {
-	commit, err := resolveGitCommit(projectDir, src)
-	if err != nil {
-		if src.Ref != "" && source.IsCommitRef(src.Ref) && source.IsNoMatchingRevision(err) {
-			return source.ResolveInfo{}, true, nil
-		}
-		return source.ResolveInfo{}, false, err
-	}
-
 	info, err := resolveGitInfo(projectDir, src)
 	if err == nil {
-		info.Commit = commit
 		if info.Tracking == "" {
 			info.Tracking = fallbackUpdateTracking(src)
 		}
-		return info, false, nil
+		return info, info.Pinned, nil
+	}
+	if src.Ref != "" && source.IsCommitRef(src.Ref) && source.IsNoMatchingRevision(err) {
+		return source.ResolveInfo{}, true, nil
+	}
+
+	commit, commitErr := resolveGitCommit(projectDir, src)
+	if commitErr != nil {
+		return source.ResolveInfo{}, false, commitErr
 	}
 
 	return source.ResolveInfo{
