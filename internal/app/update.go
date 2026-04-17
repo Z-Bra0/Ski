@@ -343,7 +343,7 @@ func resolveUpdateInfo(projectDir string, src source.Git) (source.ResolveInfo, b
 		if info.Tracking == "" {
 			info.Tracking = fallbackUpdateTracking(src)
 		}
-		return info, false, nil
+		return info, info.Pinned, nil
 	}
 	if src.Ref != "" && source.IsCommitRef(src.Ref) && source.IsNoMatchingRevision(err) {
 		return source.ResolveInfo{}, true, nil

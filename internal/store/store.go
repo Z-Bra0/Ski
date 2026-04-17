@@ -137,6 +137,11 @@ func discoverGit(projectRoot, homeDir string, spec source.Git, forceRefresh bool
 	if err != nil {
 		return RepoResult{}, err
 	}
+	// The store snapshot excludes git metadata, so strip it before hashing to
+	// avoid walking a clone's object database unnecessarily.
+	if err := os.RemoveAll(filepath.Join(checkoutDir, ".git")); err != nil {
+		return RepoResult{}, fmt.Errorf("remove git metadata: %w", err)
+	}
 	if _, err := HashDir(checkoutDir); err != nil {
 		if errors.Is(err, fsutil.ErrSymlinkNotPermitted) {
 			return RepoResult{}, fmt.Errorf("repository snapshot contains symlink entries: %w", err)

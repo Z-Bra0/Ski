@@ -50,6 +50,7 @@ type ResolveInfo struct {
 	Commit   string
 	Tracking string
 	LatestAt string
+	Pinned   bool
 }
 
 // ParseGit parses a canonical git: source or a bare remote git URL.
@@ -353,33 +354,36 @@ func ResolveGitInfo(dir string, spec Git) (ResolveInfo, error) {
 			Commit:   commit,
 			Tracking: tracking,
 			LatestAt: latestAt,
-		}, nil
-	}
-
-	if len(spec.Ref) == 40 && IsCommitRef(spec.Ref) {
-		latestAt, err := resolveGitCommitDate(spec.URL, spec.Ref, spec.Ref)
-		if err != nil {
-			return ResolveInfo{}, err
-		}
-		return ResolveInfo{
-			Commit:   spec.Ref,
-			Tracking: spec.Ref,
-			LatestAt: latestAt,
+			Pinned:   false,
 		}, nil
 	}
 
 	commit, err := resolveGit(dir, spec)
-	if err != nil {
+	if err == nil {
+		latestAt, err := resolveGitCommitDate(spec.URL, commit, spec.Ref)
+		if err != nil {
+			return ResolveInfo{}, err
+		}
+		return ResolveInfo{
+			Commit:   commit,
+			Tracking: spec.Ref,
+			LatestAt: latestAt,
+			Pinned:   false,
+		}, nil
+	}
+	if !IsCommitRef(spec.Ref) || !IsNoMatchingRevision(err) {
 		return ResolveInfo{}, err
 	}
-	latestAt, err := resolveGitCommitDate(spec.URL, commit, spec.Ref)
+
+	latestAt, err := resolveGitCommitDate(spec.URL, spec.Ref, spec.Ref)
 	if err != nil {
 		return ResolveInfo{}, err
 	}
 	return ResolveInfo{
-		Commit:   commit,
+		Commit:   spec.Ref,
 		Tracking: spec.Ref,
 		LatestAt: latestAt,
+		Pinned:   true,
 	}, nil
 }
 
